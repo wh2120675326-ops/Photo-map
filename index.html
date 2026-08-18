@@ -1,0 +1,874 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0f766e" />
+  <title>相册足迹地图</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/heic-to@1.5.2/dist/iife/heic-to.js"></script>
+
+  <style>
+    html, body { height: 100%; }
+    #map { min-height: 420px; height: calc(100vh - 18rem); }
+    .leaflet-popup-content-wrapper { border-radius: 14px; }
+    .leaflet-popup-content { margin: 14px 16px; }
+    #timelineSlider { accent-color: #0f766e; }
+    #timelineSlider::-webkit-slider-thumb {
+      width: 20px; height: 20px; border: 3px solid white; border-radius: 9999px;
+      background: #0f766e; box-shadow: 0 1px 5px rgb(15 23 42 / 0.3);
+      cursor: grab; -webkit-appearance: none; appearance: none;
+    }
+    #timelineSlider:active::-webkit-slider-thumb { cursor: grabbing; }
+    #timelineSlider::-moz-range-thumb {
+      width: 16px; height: 16px; border: 3px solid white; border-radius: 9999px;
+      background: #0f766e; box-shadow: 0 1px 5px rgb(15 23 42 / 0.3); cursor: grab;
+    }
+    #mapSection:fullscreen { border-radius: 0; border: 0; }
+    #mapSection:fullscreen #map { height: 100vh; }
+    #mapSection.map-fullscreen-fallback {
+      position: fixed; inset: 0; z-index: 1900; border: 0; border-radius: 0;
+    }
+    #mapSection.map-fullscreen-fallback #map { height: 100vh; }
+    @media (max-width: 640px) {
+      #map { min-height: 430px; height: calc(100vh - 22rem); }
+    }
+  </style>
+</head>
+<body class="min-h-full bg-slate-50 text-slate-900 antialiased">
+  <main class="mx-auto flex min-h-full w-full max-w-7xl flex-col gap-4 p-3 sm:p-5 lg:p-7">
+    <header class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+      <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p class="mb-1 text-sm font-semibold tracking-wide text-teal-700">LOCAL PHOTO JOURNEY</p>
+          <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">相册足迹地图</h1>
+          <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+            选择单张照片或整个照片文件夹，在地图上回看照片留下的坐标。支持 JPG、JPEG、PNG、HEIC 和 HEIF。
+          </p>
+        </div>
+
+        <div class="flex shrink-0 flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
+          <button id="chooseButton" type="button"
+            class="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-teal-700 px-5 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-teal-800 focus:outline-none focus:ring-4 focus:ring-teal-200 disabled:cursor-not-allowed disabled:bg-slate-400">
+            <span aria-hidden="true">📁</span>
+            <span id="buttonText">选择照片文件夹</span>
+          </button>
+          <button id="singlePhotoButton" type="button"
+            class="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-teal-700 bg-white px-4 py-3 text-sm font-semibold text-teal-800 transition hover:bg-teal-50 focus:outline-none focus:ring-4 focus:ring-teal-100 disabled:cursor-not-allowed disabled:text-slate-400">
+            <span aria-hidden="true">🖼️</span>
+            选择单张照片
+          </button>
+          <input id="folderInput" class="hidden" type="file" webkitdirectory directory multiple
+            accept=".jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic,image/heif" />
+          <input id="singlePhotoInput" class="hidden" type="file"
+            accept=".jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic,image/heif" />
+        </div>
+      </div>
+
+      <div class="mt-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900" role="note">
+        <span class="mt-0.5 text-lg" aria-hidden="true">🔒</span>
+        <p class="font-semibold leading-6">所有照片仅在本地浏览器处理，不上传任何服务器</p>
+      </div>
+
+      <div class="mt-4 grid grid-cols-3 gap-3 sm:max-w-2xl">
+        <section class="rounded-xl bg-slate-100 px-4 py-3" aria-label="总照片数">
+          <p class="text-xs font-medium text-slate-500">总照片数</p>
+          <p id="totalCount" class="mt-1 text-2xl font-bold tabular-nums">0</p>
+        </section>
+        <button id="locatedCard" type="button" disabled aria-haspopup="dialog"
+          class="rounded-xl bg-teal-50 px-4 py-3 text-left transition hover:bg-teal-100 focus:outline-none focus:ring-4 focus:ring-teal-100 disabled:cursor-default disabled:opacity-60" aria-label="查看有位置的照片">
+          <p class="text-xs font-medium text-teal-700">有位置的照片</p>
+          <p id="locatedCount" class="mt-1 text-2xl font-bold text-teal-900 tabular-nums">0</p>
+        </button>
+        <button id="noLocationCard" type="button" disabled aria-haspopup="dialog"
+          class="rounded-xl bg-amber-50 px-3 py-3 text-left transition hover:bg-amber-100 focus:outline-none focus:ring-4 focus:ring-amber-100 disabled:cursor-default disabled:opacity-60 sm:px-4">
+          <p class="text-xs font-medium leading-4 text-amber-700">没有位置的照片</p>
+          <p id="noLocationCount" class="mt-1 text-2xl font-bold text-amber-900 tabular-nums">0</p>
+        </button>
+      </div>
+
+      <div id="status" class="mt-4 text-sm text-slate-600" aria-live="polite">
+        点击按钮开始读取照片。
+      </div>
+      <div id="progressWrap" class="mt-2 hidden h-2 overflow-hidden rounded-full bg-slate-200" aria-hidden="true">
+        <div id="progressBar" class="h-full w-0 rounded-full bg-teal-600 transition-all duration-200"></div>
+      </div>
+    </header>
+
+    <section id="mapSection" class="relative flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="照片足迹地图">
+      <div id="map" class="w-full"></div>
+      <button id="fullscreenButton" type="button"
+        class="absolute right-3 top-3 z-[650] inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-sm font-semibold text-slate-700 shadow-lg backdrop-blur transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-teal-100"
+        aria-label="全屏查看地图" title="全屏查看地图">
+        <span aria-hidden="true">⛶</span>
+        <span id="fullscreenButtonText" class="hidden sm:inline">全屏查看</span>
+      </button>
+      <div id="timelinePanel" class="absolute bottom-8 left-1/2 z-[600] hidden w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 rounded-2xl border border-white/70 bg-white/95 p-4 shadow-xl backdrop-blur sm:p-5">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-teal-700">足迹时间轴</p>
+            <p id="timelineCurrent" class="mt-0.5 text-sm font-bold text-slate-900">全部日期</p>
+          </div>
+          <button id="showAllButton" type="button" class="shrink-0 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus:ring-4 focus:ring-slate-200">
+            显示全部
+          </button>
+        </div>
+        <input id="timelineSlider" class="h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-200" type="range" min="0" max="0" value="0" step="1" aria-label="按拍摄日期查看照片足迹" />
+        <div class="mt-2 flex justify-between gap-4 text-xs font-medium tabular-nums text-slate-500">
+          <span id="timelineStart">—</span>
+          <span id="timelineEnd">—</span>
+        </div>
+      </div>
+      <div id="emptyState" class="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center bg-slate-100/75 p-6 backdrop-blur-[1px]">
+        <div class="max-w-sm rounded-2xl bg-white/95 p-6 text-center shadow-lg ring-1 ring-slate-200">
+          <div class="text-4xl" aria-hidden="true">🗺️</div>
+          <p class="mt-3 font-semibold">地图正等待你的照片足迹</p>
+          <p class="mt-1 text-sm leading-6 text-slate-500">读取完成后，带 GPS 信息的照片会显示在这里。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="noLocationModal" class="fixed inset-0 z-[2000] hidden items-center justify-center bg-slate-950/60 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true" aria-labelledby="noLocationTitle">
+    <div class="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+        <div>
+          <h2 id="noLocationTitle" class="text-lg font-bold">没有位置的照片</h2>
+          <p id="noLocationSummary" class="mt-0.5 text-sm text-slate-500"></p>
+        </div>
+        <div class="flex items-center gap-2">
+          <label for="gallerySortSelect" class="sr-only">照片排序方式</label>
+          <select id="gallerySortSelect" class="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 focus:border-teal-600 focus:outline-none focus:ring-4 focus:ring-teal-100">
+            <option value="oldest">从旧到新</option>
+            <option value="newest">从新到旧</option>
+          </select>
+          <button id="closeNoLocationModal" type="button" class="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-xl text-slate-600 hover:bg-slate-200" aria-label="关闭照片列表">×</button>
+        </div>
+      </div>
+      <div class="overflow-y-auto p-4 sm:p-5">
+        <div id="noLocationGrid" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="photoViewer" class="fixed inset-0 z-[2100] hidden items-center justify-center bg-slate-950/85 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true" aria-label="查看照片">
+    <div class="relative flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <button id="closePhotoViewer" type="button" class="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-slate-900/70 text-2xl text-white hover:bg-slate-900" aria-label="关闭照片">×</button>
+      <button id="previousPhotoButton" type="button" class="absolute left-3 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-slate-900/70 text-3xl text-white shadow-lg transition hover:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-white/40 disabled:cursor-default disabled:opacity-25" aria-label="上一张照片">‹</button>
+      <button id="nextPhotoButton" type="button" class="absolute right-3 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-slate-900/70 text-3xl text-white shadow-lg transition hover:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-white/40 disabled:cursor-default disabled:opacity-25" aria-label="下一张照片">›</button>
+      <div id="photoViewerImage" class="flex min-h-64 flex-1 items-center justify-center overflow-hidden bg-slate-100 p-4 text-sm text-slate-500">正在加载照片…</div>
+      <div class="flex items-end justify-between gap-4 border-t border-slate-200 px-5 py-4">
+        <div class="min-w-0">
+          <p id="photoViewerName" class="break-all font-bold text-slate-900"></p>
+          <p id="photoViewerDate" class="mt-1 text-sm text-slate-500"></p>
+        </div>
+        <div class="shrink-0 text-right">
+          <p id="photoViewerPosition" class="text-sm font-semibold tabular-nums text-slate-700"></p>
+          <p class="mt-1 hidden text-xs text-slate-400 sm:block">方向键切换</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const chooseButton = document.getElementById('chooseButton');
+    const folderInput = document.getElementById('folderInput');
+    const singlePhotoButton = document.getElementById('singlePhotoButton');
+    const singlePhotoInput = document.getElementById('singlePhotoInput');
+    const buttonText = document.getElementById('buttonText');
+    const totalCount = document.getElementById('totalCount');
+    const locatedCount = document.getElementById('locatedCount');
+    const locatedCard = document.getElementById('locatedCard');
+    const noLocationCount = document.getElementById('noLocationCount');
+    const noLocationCard = document.getElementById('noLocationCard');
+    const status = document.getElementById('status');
+    const progressWrap = document.getElementById('progressWrap');
+    const progressBar = document.getElementById('progressBar');
+    const emptyState = document.getElementById('emptyState');
+    const mapSection = document.getElementById('mapSection');
+    const fullscreenButton = document.getElementById('fullscreenButton');
+    const fullscreenButtonText = document.getElementById('fullscreenButtonText');
+    const timelinePanel = document.getElementById('timelinePanel');
+    const timelineSlider = document.getElementById('timelineSlider');
+    const timelineCurrent = document.getElementById('timelineCurrent');
+    const timelineStart = document.getElementById('timelineStart');
+    const timelineEnd = document.getElementById('timelineEnd');
+    const showAllButton = document.getElementById('showAllButton');
+    const noLocationModal = document.getElementById('noLocationModal');
+    const closeNoLocationModal = document.getElementById('closeNoLocationModal');
+    const galleryTitle = document.getElementById('noLocationTitle');
+    const noLocationSummary = document.getElementById('noLocationSummary');
+    const gallerySortSelect = document.getElementById('gallerySortSelect');
+    const noLocationGrid = document.getElementById('noLocationGrid');
+    const photoViewer = document.getElementById('photoViewer');
+    const closePhotoViewer = document.getElementById('closePhotoViewer');
+    const previousPhotoButton = document.getElementById('previousPhotoButton');
+    const nextPhotoButton = document.getElementById('nextPhotoButton');
+    const photoViewerImage = document.getElementById('photoViewerImage');
+    const photoViewerName = document.getElementById('photoViewerName');
+    const photoViewerDate = document.getElementById('photoViewerDate');
+    const photoViewerPosition = document.getElementById('photoViewerPosition');
+
+    const map = L.map('map', { zoomControl: true }).setView([30, 105], 4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+    const markerLayer = L.layerGroup().addTo(map);
+    let currentMarkerRecords = [];
+    let timelineGroups = [];
+    let noLocationRecords = [];
+    let activeGalleryRecords = [];
+    let galleryObserver = null;
+    let currentViewerIndex = -1;
+    let viewerLoadToken = 0;
+
+    function setBusy(busy) {
+      chooseButton.disabled = busy;
+      singlePhotoButton.disabled = busy;
+      buttonText.textContent = busy ? '正在读取照片…' : '重新选择文件夹';
+      progressWrap.classList.toggle('hidden', !busy);
+      if (!busy) progressBar.style.width = '0%';
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>'"]/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+      })[char]);
+    }
+
+    function formatDate(value) {
+      if (!value) return '拍摄日期未知';
+      const date = value instanceof Date ? value : new Date(value);
+      if (Number.isNaN(date.getTime())) return '拍摄日期未知';
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function setupTimeline(records) {
+      currentMarkerRecords = records;
+      const groups = new Map();
+
+      for (const record of records) {
+        if (!record.date || record.photoDate === '拍摄日期未知') continue;
+        if (!groups.has(record.photoDate)) groups.set(record.photoDate, []);
+        groups.get(record.photoDate).push(record);
+      }
+
+      timelineGroups = Array.from(groups, ([date, items]) => ({
+        date,
+        time: items[0].date.getTime(),
+        items
+      })).sort((a, b) => a.time - b.time);
+
+      if (!timelineGroups.length) {
+        timelinePanel.classList.add('hidden');
+        return;
+      }
+
+      timelineSlider.min = '0';
+      timelineSlider.max = String(Math.max(0, timelineGroups.length - 1));
+      timelineSlider.value = '0';
+      timelineSlider.disabled = timelineGroups.length === 1;
+      timelineStart.textContent = timelineGroups[0].date;
+      timelineEnd.textContent = timelineGroups[timelineGroups.length - 1].date;
+      timelinePanel.classList.remove('hidden');
+      showAllMarkers();
+    }
+
+    function showTimelineDate(index) {
+      const group = timelineGroups[index];
+      if (!group) return;
+
+      for (const record of currentMarkerRecords) {
+        record.marker.setOpacity(group.items.includes(record) ? 1 : 0.18);
+        record.marker.setZIndexOffset(group.items.includes(record) ? 1000 : 0);
+      }
+
+      timelineCurrent.textContent = `${group.date} · ${group.items.length} 个地点戳`;
+      const bounds = L.latLngBounds(group.items.map(item => [item.lat, item.lng]));
+      if (group.items.length === 1) {
+        const record = group.items[0];
+        map.setView([record.lat, record.lng], Math.max(map.getZoom(), 12));
+        record.marker.openPopup();
+        ensureMedia(record)
+          .then(() => record.marker.setPopupContent(popupContent(record)))
+          .catch(() => record.marker.setPopupContent('<div class="p-3 text-sm text-red-700">照片预览生成失败</div>'));
+      } else {
+        map.fitBounds(bounds, { padding: [70, 70], maxZoom: 14 });
+      }
+    }
+
+    function showAllMarkers() {
+      for (const record of currentMarkerRecords) {
+        record.marker.setOpacity(1);
+        record.marker.setZIndexOffset(0);
+      }
+      map.closePopup();
+      timelineCurrent.textContent = timelineGroups.length
+        ? `全部日期 · ${currentMarkerRecords.length} 个地点戳`
+        : '全部日期';
+      if (currentMarkerRecords.length) {
+        map.fitBounds(L.latLngBounds(currentMarkerRecords.map(item => [item.lat, item.lng])), {
+          padding: [50, 50],
+          maxZoom: 15
+        });
+      }
+    }
+
+    function isMapFullscreen() {
+      const nativeElement = document.fullscreenElement || document.webkitFullscreenElement;
+      return nativeElement === mapSection || mapSection.classList.contains('map-fullscreen-fallback');
+    }
+
+    function refreshMapAfterFullscreen() {
+      const active = isMapFullscreen();
+      fullscreenButtonText.textContent = active ? '退出全屏' : '全屏查看';
+      fullscreenButton.setAttribute('aria-label', active ? '退出地图全屏' : '全屏查看地图');
+      fullscreenButton.title = active ? '退出地图全屏' : '全屏查看地图';
+      window.setTimeout(() => map.invalidateSize(), 120);
+    }
+
+    function setFallbackFullscreen(active) {
+      mapSection.classList.toggle('map-fullscreen-fallback', active);
+      document.body.classList.toggle('overflow-hidden', active);
+      refreshMapAfterFullscreen();
+    }
+
+    async function toggleMapFullscreen() {
+      const nativeElement = document.fullscreenElement || document.webkitFullscreenElement;
+      const requestFullscreen = mapSection.requestFullscreen || mapSection.webkitRequestFullscreen;
+      const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
+
+      if (mapSection.classList.contains('map-fullscreen-fallback')) {
+        setFallbackFullscreen(false);
+        return;
+      }
+
+      if (!requestFullscreen || !exitFullscreen) {
+        setFallbackFullscreen(true);
+        return;
+      }
+
+      try {
+        if (nativeElement === mapSection) await exitFullscreen.call(document);
+        else await requestFullscreen.call(mapSection);
+      } catch (error) {
+        console.warn('标准全屏模式不可用，已切换为页面内全屏', error);
+        setFallbackFullscreen(true);
+      }
+    }
+
+    async function collectPhotos(directoryHandle) {
+      const photos = [];
+      for await (const entry of directoryHandle.values()) {
+        if (entry.kind === 'directory') {
+          photos.push(...await collectPhotos(entry));
+        } else if (/\.(jpe?g|png|heic|heif)$/i.test(entry.name)) {
+          photos.push(await entry.getFile());
+        }
+      }
+      return photos;
+    }
+
+    function isPhoto(file) {
+      return /\.(jpe?g|png|heic|heif)$/i.test(file.name);
+    }
+
+    function isHeic(file) {
+      return /\.(heic|heif)$/i.test(file.name);
+    }
+
+    function releaseMedia() {
+      for (const record of [...currentMarkerRecords, ...noLocationRecords]) {
+        if (record.displayUrl) URL.revokeObjectURL(record.displayUrl);
+      }
+    }
+
+    async function createThumbnail(blob, maxSize = 240) {
+      const sourceUrl = URL.createObjectURL(blob);
+      try {
+        const image = new Image();
+        await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = () => reject(new Error('浏览器无法解码转换后的图片'));
+          image.src = sourceUrl;
+        });
+        const scale = Math.min(1, maxSize / image.naturalWidth, maxSize / image.naturalHeight);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/jpeg', 0.48);
+      } finally {
+        URL.revokeObjectURL(sourceUrl);
+      }
+    }
+
+    async function ensureMedia(record) {
+      if (record.mediaPromise) return record.mediaPromise;
+
+      record.mediaPromise = (async () => {
+        let displayBlob = record.file;
+        if (isHeic(record.file)) {
+          if (!window.HeicTo) throw new Error('HEIC 解码组件未加载，请检查网络后刷新页面');
+          let converted;
+          try {
+            converted = await window.HeicTo({
+              blob: record.file,
+              type: 'image/jpeg',
+              quality: 0.82
+            });
+          } catch (error) {
+            throw new Error(`HEIC 解码失败：${error?.message || error}`);
+          }
+          displayBlob = Array.isArray(converted) ? converted[0] : converted;
+          if (!(displayBlob instanceof Blob)) throw new Error('HEIC 解码没有返回有效图片');
+        }
+        record.displayUrl = URL.createObjectURL(displayBlob);
+        try {
+          record.previewUrl = await createThumbnail(displayBlob);
+        } catch (error) {
+          // 大图已经可用时，即使浏览器无法生成缩略图，也不要阻止点击查看。
+          record.previewUrl = record.displayUrl;
+          console.warn(`无法压缩 ${record.file.name} 的低清预览，将使用原图`, error);
+        }
+        return record;
+      })().catch(error => {
+        record.mediaError = error;
+        console.warn(`无法生成 ${record.file.name} 的预览图`, error);
+        throw error;
+      });
+
+      return record.mediaPromise;
+    }
+
+    function tooltipContent(record, loading = false) {
+      if (loading) {
+        return `<div class="w-44 py-3 text-center text-xs text-slate-500">正在生成低清预览…</div>`;
+      }
+      return `
+        <div class="w-44 overflow-hidden">
+          <img src="${record.previewUrl}" alt="${escapeHtml(record.file.name)} 的低清预览" class="h-28 w-full rounded-lg object-cover" />
+          <p class="mt-2 text-center text-xs font-semibold text-slate-700">${escapeHtml(record.photoDate)}</p>
+        </div>
+      `;
+    }
+
+    function popupContent(record, loading = false) {
+      return `
+        <div class="w-64 max-w-full">
+          ${loading
+            ? '<div class="flex h-40 items-center justify-center rounded-lg bg-slate-100 text-sm text-slate-500">正在加载照片…</div>'
+            : `<img src="${record.displayUrl}" alt="${escapeHtml(record.file.name)}" class="max-h-72 w-full rounded-lg bg-slate-100 object-contain" />`}
+          <p class="mt-3 text-xs font-semibold uppercase tracking-wide text-teal-700">照片足迹</p>
+          <p class="mt-1 break-all text-sm font-bold text-slate-900">${escapeHtml(record.file.name)}</p>
+          <p class="mt-2 text-sm text-slate-600">拍摄日期：${escapeHtml(record.photoDate)}</p>
+        </div>
+      `;
+    }
+
+    function closeViewer() {
+      viewerLoadToken += 1;
+      currentViewerIndex = -1;
+      photoViewer.classList.add('hidden');
+      photoViewer.classList.remove('flex');
+      if (noLocationModal.classList.contains('hidden')) document.body.classList.remove('overflow-hidden');
+    }
+
+    function closeGallery() {
+      galleryObserver?.disconnect();
+      galleryObserver = null;
+      activeGalleryRecords = [];
+      noLocationModal.classList.add('hidden');
+      noLocationModal.classList.remove('flex');
+      closeViewer();
+      document.body.classList.remove('overflow-hidden');
+    }
+
+    async function openPhotoViewer(record, index = activeGalleryRecords.indexOf(record)) {
+      const loadToken = ++viewerLoadToken;
+      currentViewerIndex = index;
+      photoViewer.classList.remove('hidden');
+      photoViewer.classList.add('flex');
+      photoViewerName.textContent = record.file.name;
+      photoViewerDate.textContent = `拍摄日期：${record.photoDate}`;
+      photoViewerPosition.textContent = `${index + 1} / ${activeGalleryRecords.length}`;
+      previousPhotoButton.disabled = index <= 0;
+      nextPhotoButton.disabled = index >= activeGalleryRecords.length - 1;
+      photoViewerImage.innerHTML = '<span>正在加载照片…</span>';
+
+      try {
+        await ensureMedia(record);
+        if (loadToken !== viewerLoadToken) return;
+        const image = document.createElement('img');
+        image.src = record.displayUrl;
+        image.alt = record.file.name;
+        image.className = 'max-h-[72vh] max-w-full rounded-lg object-contain';
+        photoViewerImage.replaceChildren(image);
+      } catch (error) {
+        if (loadToken !== viewerLoadToken) return;
+        photoViewerImage.innerHTML = `
+          <div class="max-w-md p-6 text-center">
+            <p class="font-semibold text-red-700">照片预览生成失败</p>
+            <p class="mt-2 break-words text-xs text-slate-500">${escapeHtml(error?.message || error)}</p>
+          </div>
+        `;
+      }
+    }
+
+    function showAdjacentPhoto(offset) {
+      if (currentViewerIndex < 0) return;
+      const nextIndex = currentViewerIndex + offset;
+      if (nextIndex < 0 || nextIndex >= activeGalleryRecords.length) return;
+      openPhotoViewer(activeGalleryRecords[nextIndex], nextIndex);
+    }
+
+    function loadGalleryThumbnail(button, record) {
+      const preview = button.querySelector('[data-preview]');
+      ensureMedia(record).then(() => {
+        const image = document.createElement('img');
+        image.src = record.previewUrl;
+        image.alt = `${record.file.name} 的低清预览`;
+        image.className = 'h-full w-full object-cover transition duration-300 group-hover:scale-105';
+        preview.replaceChildren(image);
+      }).catch(error => {
+        preview.innerHTML = `<span class="px-2 text-center text-xs text-red-700">无法生成预览<br>${escapeHtml(error?.message || '')}</span>`;
+      });
+    }
+
+    function sortGalleryRecords(records) {
+      const direction = gallerySortSelect.value === 'newest' ? -1 : 1;
+      return [...records].sort((a, b) => {
+        const aTime = a.date instanceof Date ? a.date.getTime() : NaN;
+        const bTime = b.date instanceof Date ? b.date.getTime() : NaN;
+        const aHasDate = Number.isFinite(aTime);
+        const bHasDate = Number.isFinite(bTime);
+
+        // 无有效日期的照片始终放在最后。
+        if (aHasDate !== bHasDate) return aHasDate ? -1 : 1;
+        if (aHasDate && aTime !== bTime) return (aTime - bTime) * direction;
+        return a.file.name.localeCompare(b.file.name, 'zh-CN', { numeric: true });
+      });
+    }
+
+    function openPhotoGallery(records, title) {
+      if (!records.length) return;
+      activeGalleryRecords = sortGalleryRecords(records);
+      galleryTitle.textContent = title;
+      const orderLabel = gallerySortSelect.value === 'newest' ? '从新到旧' : '从旧到新';
+      noLocationSummary.textContent = `共 ${activeGalleryRecords.length} 张 · ${orderLabel}，点击任意照片单独查看`;
+      noLocationGrid.innerHTML = activeGalleryRecords.map((record, index) => `
+        <button type="button" data-photo-index="${index}" class="group overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-teal-100">
+          <div data-preview class="flex aspect-[4/3] items-center justify-center overflow-hidden bg-slate-100 text-2xl" aria-hidden="true">🖼️</div>
+          <div class="p-3">
+            <p class="truncate text-sm font-semibold text-slate-800" title="${escapeHtml(record.file.name)}">${escapeHtml(record.file.name)}</p>
+            <p class="mt-1 text-xs tabular-nums text-slate-500">${escapeHtml(record.photoDate)}</p>
+          </div>
+        </button>
+      `).join('');
+
+      noLocationModal.classList.remove('hidden');
+      noLocationModal.classList.add('flex');
+      document.body.classList.add('overflow-hidden');
+
+      galleryObserver?.disconnect();
+      galleryObserver = new IntersectionObserver(entries => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const button = entry.target;
+          const record = activeGalleryRecords[Number(button.dataset.photoIndex)];
+          galleryObserver.unobserve(button);
+          loadGalleryThumbnail(button, record);
+        }
+      }, { root: noLocationModal, rootMargin: '160px' });
+
+      noLocationGrid.querySelectorAll('[data-photo-index]').forEach(button => {
+        galleryObserver.observe(button);
+        button.addEventListener('click', () => {
+          const record = activeGalleryRecords[Number(button.dataset.photoIndex)];
+          openPhotoViewer(record, Number(button.dataset.photoIndex));
+        });
+      });
+    }
+
+    function openNoLocationGallery() {
+      openPhotoGallery(noLocationRecords, '没有位置的照片');
+    }
+
+    function openLocatedGallery() {
+      openPhotoGallery(currentMarkerRecords, '有位置的照片');
+    }
+
+    async function readExif(file) {
+      try {
+        const data = await exifr.parse(file, { gps: true });
+        const lat = Number(data?.latitude);
+        const lng = Number(data?.longitude);
+        const hasLocation = Number.isFinite(lat) && Number.isFinite(lng)
+          && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+        return {
+          lat: hasLocation ? lat : null,
+          lng: hasLocation ? lng : null,
+          hasLocation,
+          time: data.DateTimeOriginal || data.CreateDate || data.ModifyDate || null
+        };
+      } catch (error) {
+        console.warn(`无法读取 ${file.name} 的 EXIF 信息`, error);
+        return { lat: null, lng: null, hasLocation: false, time: null };
+      }
+    }
+
+    async function displayPhotos(photos) {
+        releaseMedia();
+        markerLayer.clearLayers();
+        timelinePanel.classList.add('hidden');
+        currentMarkerRecords = [];
+        timelineGroups = [];
+        noLocationRecords = [];
+        noLocationCount.textContent = '0';
+        noLocationCard.disabled = true;
+        closeGallery();
+        emptyState.classList.remove('hidden');
+        totalCount.textContent = '0';
+        locatedCount.textContent = '0';
+        locatedCard.disabled = true;
+        totalCount.textContent = photos.length;
+
+        if (!photos.length) {
+          status.textContent = '所选文件夹中没有找到 JPG、JPEG、PNG、HEIC 或 HEIF 照片。';
+          return;
+        }
+
+        if (!window.exifr) {
+          throw new Error('EXIF 解析库加载失败，请检查网络连接后刷新页面');
+        }
+
+        const points = [];
+        const markerRecords = [];
+        for (let i = 0; i < photos.length; i++) {
+          const file = photos[i];
+          status.textContent = `正在读取 EXIF：${i + 1} / ${photos.length}`;
+          progressBar.style.width = `${Math.round(((i + 1) / photos.length) * 100)}%`;
+
+          const location = await readExif(file);
+          const parsedDate = location.time instanceof Date ? location.time : new Date(location.time);
+          const validDate = location.time && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
+          const photoDate = formatDate(location.time);
+
+          if (!location.hasLocation) {
+            noLocationRecords.push({
+              marker: null,
+              file,
+              lat: null,
+              lng: null,
+              date: validDate,
+              photoDate,
+              displayUrl: null,
+              previewUrl: null,
+              mediaPromise: null,
+              mediaError: null
+            });
+            noLocationCount.textContent = noLocationRecords.length;
+            noLocationCard.disabled = false;
+            if ((i + 1) % 8 === 0) await new Promise(requestAnimationFrame);
+            continue;
+          }
+
+          const marker = L.marker([location.lat, location.lng]);
+          const record = {
+            marker,
+            file,
+            lat: location.lat,
+            lng: location.lng,
+            date: validDate,
+            photoDate,
+            displayUrl: null,
+            previewUrl: null,
+            mediaPromise: null,
+            mediaError: null
+          };
+
+          marker.bindTooltip(escapeHtml(photoDate), {
+            direction: 'top',
+            offset: [0, -10],
+            opacity: 0.98,
+            className: 'photo-preview-tooltip'
+          });
+          marker.bindPopup(popupContent(record, true), { maxWidth: 320 });
+          marker.on('mouseover', async () => {
+            if (record.previewUrl) {
+              marker.setTooltipContent(tooltipContent(record));
+              return;
+            }
+            marker.setTooltipContent(tooltipContent(record, true));
+            try {
+              await ensureMedia(record);
+              marker.setTooltipContent(tooltipContent(record));
+            } catch (error) {
+              marker.setTooltipContent(`<div class="w-48 py-2 text-center text-xs text-red-700">预览生成失败<br><span class="text-slate-500">${escapeHtml(error?.message || error)}</span></div>`);
+            }
+          });
+          marker.on('click', async () => {
+            if (record.displayUrl) {
+              marker.setPopupContent(popupContent(record));
+              return;
+            }
+            marker.setPopupContent(popupContent(record, true));
+            try {
+              await ensureMedia(record);
+              marker.setPopupContent(popupContent(record));
+            } catch (error) {
+              marker.setPopupContent(`
+                <div class="w-64 py-4 text-center">
+                  <p class="font-semibold text-red-700">照片预览生成失败</p>
+                  <p class="mt-2 break-all text-xs text-slate-500">${escapeHtml(file.name)}</p>
+                  <p class="mt-2 break-words text-xs text-slate-400">${escapeHtml(error?.message || error)}</p>
+                </div>
+              `);
+            }
+          });
+          marker.addTo(markerLayer);
+          points.push([location.lat, location.lng]);
+          markerRecords.push(record);
+          locatedCount.textContent = points.length;
+
+          if ((i + 1) % 8 === 0) await new Promise(requestAnimationFrame);
+        }
+
+        if (points.length) {
+          emptyState.classList.add('hidden');
+          const bounds = L.latLngBounds(points);
+          if (points.length === 1) map.setView(points[0], 13);
+          else map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+          setupTimeline(markerRecords);
+          locatedCard.disabled = false;
+          status.textContent = `读取完成：${points.length} 张有位置，${noLocationRecords.length} 张没有位置。`;
+        } else {
+          status.textContent = `读取完成：${photos.length} 张照片均没有位置信息，可点击上方统计卡片查看。`;
+        }
+    }
+
+    async function processDirectory() {
+      // file:// 环境可能暴露 showDirectoryPicker，却无法可靠遍历返回的文件夹句柄。
+      // 此时直接使用浏览器原生的 webkitdirectory 兼容入口。
+      if (window.location.protocol === 'file:') {
+        status.textContent = '当前为本地文件模式，正在使用兼容方式选择文件夹…';
+        folderInput.click();
+        return;
+      }
+
+      if (!('showDirectoryPicker' in window)) {
+        status.textContent = '当前环境不支持标准文件夹接口，已切换到兼容模式。';
+        folderInput.click();
+        return;
+      }
+
+      try {
+        const directory = await window.showDirectoryPicker({ mode: 'read', id: 'photo-footprint-folder' });
+        setBusy(true);
+        status.textContent = '已获得文件夹权限，正在查找照片…';
+        const photos = await collectPhotos(directory);
+        await displayPhotos(photos);
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          status.textContent = '已取消选择文件夹。';
+        } else {
+          console.error(error);
+          status.innerHTML = `<span class="font-semibold text-red-700">读取失败：</span>${escapeHtml(error?.message || error)}。请重新点击绿色按钮，或尝试选择单张照片。`;
+        }
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function processFallback(event) {
+      const photos = Array.from(event.target.files || []).filter(isPhoto);
+      if (!event.target.files?.length) return;
+      try {
+        setBusy(true);
+        status.textContent = `已选择 ${event.target.files.length} 个文件，正在筛选照片…`;
+        await displayPhotos(photos);
+      } catch (error) {
+        console.error(error);
+        status.innerHTML = `<span class="font-semibold text-red-700">读取失败：</span>${escapeHtml(error?.message || error)}。`;
+      } finally {
+        setBusy(false);
+        folderInput.value = '';
+      }
+    }
+
+    async function processSinglePhoto(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      try {
+        setBusy(true);
+        status.textContent = `正在读取照片：${file.name}`;
+        await displayPhotos(isPhoto(file) ? [file] : []);
+      } catch (error) {
+        console.error(error);
+        status.innerHTML = `<span class="font-semibold text-red-700">读取失败：</span>${escapeHtml(error?.message || error)}。`;
+      } finally {
+        setBusy(false);
+        singlePhotoInput.value = '';
+      }
+    }
+
+    chooseButton.addEventListener('click', processDirectory);
+    folderInput.addEventListener('change', processFallback);
+    singlePhotoButton.addEventListener('click', () => singlePhotoInput.click());
+    singlePhotoInput.addEventListener('change', processSinglePhoto);
+    timelineSlider.addEventListener('input', event => showTimelineDate(Number(event.target.value)));
+    showAllButton.addEventListener('click', showAllMarkers);
+    fullscreenButton.addEventListener('click', toggleMapFullscreen);
+    document.addEventListener('fullscreenchange', refreshMapAfterFullscreen);
+    document.addEventListener('webkitfullscreenchange', refreshMapAfterFullscreen);
+    noLocationCard.addEventListener('click', openNoLocationGallery);
+    locatedCard.addEventListener('click', openLocatedGallery);
+    gallerySortSelect.addEventListener('change', () => {
+      if (noLocationModal.classList.contains('hidden')) return;
+      openPhotoGallery(activeGalleryRecords, galleryTitle.textContent);
+    });
+    closeNoLocationModal.addEventListener('click', closeGallery);
+    closePhotoViewer.addEventListener('click', closeViewer);
+    previousPhotoButton.addEventListener('click', () => showAdjacentPhoto(-1));
+    nextPhotoButton.addEventListener('click', () => showAdjacentPhoto(1));
+    noLocationModal.addEventListener('click', event => {
+      if (event.target === noLocationModal) closeGallery();
+    });
+    photoViewer.addEventListener('click', event => {
+      if (event.target === photoViewer) closeViewer();
+    });
+    document.addEventListener('keydown', event => {
+      if (!photoViewer.classList.contains('hidden')) {
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          showAdjacentPhoto(-1);
+        } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          showAdjacentPhoto(1);
+        } else if (event.key === 'Escape') {
+          closeViewer();
+        }
+        return;
+      }
+      if (event.key !== 'Escape') return;
+      if (!noLocationModal.classList.contains('hidden')) closeGallery();
+      else if (mapSection.classList.contains('map-fullscreen-fallback')) setFallbackFullscreen(false);
+    });
+
+    if (window.location.protocol === 'file:') {
+      status.innerHTML = '<span class="font-semibold text-teal-700">本地文件模式：</span>绿色按钮会自动使用兼容方式读取文件夹。';
+    } else if (!('showDirectoryPicker' in window)) {
+      status.innerHTML = '<span class="font-semibold text-amber-700">提示：</span> 当前环境会自动使用兼容模式选择文件夹。';
+    }
+  </script>
+</body>
+</html>
