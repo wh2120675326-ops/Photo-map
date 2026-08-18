@@ -17,6 +17,7 @@
 
   <style>
     html, body { height: 100%; }
+    #mapSection { min-height: 420px; }
     #map { min-height: 420px; height: calc(100vh - 18rem); }
     .leaflet-popup-content-wrapper { border-radius: 14px; }
     .leaflet-popup-content { margin: 14px 16px; }
@@ -32,11 +33,11 @@
       background: #0f766e; box-shadow: 0 1px 5px rgb(15 23 42 / 0.3); cursor: grab;
     }
     #mapSection:fullscreen { border-radius: 0; border: 0; }
-    #mapSection:fullscreen #map { height: 100vh; }
+    #mapSection:fullscreen #map { height: 100vh; height: 100dvh; }
     #mapSection.map-fullscreen-fallback {
       position: fixed; inset: 0; z-index: 1900; border: 0; border-radius: 0;
     }
-    #mapSection.map-fullscreen-fallback #map { height: 100vh; }
+    #mapSection.map-fullscreen-fallback #map { height: 100vh; height: 100dvh; }
     .photo-marker-cluster {
       border-radius: 9999px;
       background: rgb(13 148 136 / 0.22);
@@ -62,7 +63,8 @@
       #reportContent { overflow: visible !important; }
     }
     @media (max-width: 640px) {
-      #map { min-height: 430px; height: calc(100vh - 22rem); }
+      #mapSection { min-height: 440px; }
+      #map { min-height: 440px; height: 62vh; height: 62dvh; }
     }
   </style>
 </head>
@@ -74,7 +76,7 @@
           <p class="mb-1 text-sm font-semibold tracking-wide text-teal-700">LOCAL PHOTO JOURNEY</p>
           <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">相册足迹地图</h1>
           <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            选择单张照片或整个照片文件夹，在地图上回看照片留下的坐标。支持 JPG、JPEG、PNG、HEIC 和 HEIF。
+            从相册批量选择照片或选择整个照片文件夹，在地图上回看照片留下的坐标。支持 JPG、JPEG、PNG、HEIC 和 HEIF。
           </p>
         </div>
 
@@ -87,7 +89,7 @@
           <button id="singlePhotoButton" type="button"
             class="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-teal-700 bg-white px-4 py-3 text-sm font-semibold text-teal-800 transition hover:bg-teal-50 focus:outline-none focus:ring-4 focus:ring-teal-100 disabled:cursor-not-allowed disabled:text-slate-400">
             <span aria-hidden="true">🖼️</span>
-            <span id="singlePhotoButtonText">选择单张照片</span>
+            <span id="singlePhotoButtonText">从相册选择照片</span>
           </button>
           <button id="clearSelectionButton" type="button"
             class="hidden min-h-12 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-4 focus:ring-red-100">
@@ -100,8 +102,8 @@
           </button>
           <input id="folderInput" class="hidden" type="file" webkitdirectory directory multiple
             accept=".jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic,image/heif" />
-          <input id="singlePhotoInput" class="hidden" type="file"
-            accept=".jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic,image/heif" />
+          <input id="singlePhotoInput" class="hidden" type="file" multiple
+            accept="image/*,.jpg,.jpeg,.png,.heic,.heif,image/heic,image/heif" />
         </div>
       </div>
 
@@ -325,10 +327,36 @@
 
     let selectedTimelineMarkers = new Set();
     const map = L.map('map', { zoomControl: true }).setView([30, 105], 4);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
+      updateWhenIdle: true,
+      keepBuffer: 4,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
+
+    let mapLayoutFrame = 0;
+    function refreshMapSize() {
+      window.cancelAnimationFrame(mapLayoutFrame);
+      mapLayoutFrame = window.requestAnimationFrame(() => {
+        map.invalidateSize({ pan: false, animate: false });
+      });
+    }
+
+    function revealMapOnMobile() {
+      refreshMapSize();
+      if (!window.matchMedia('(max-width: 640px)').matches) return;
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      mapSection.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    }
+
+    const mapResizeObserver = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(refreshMapSize)
+      : null;
+    mapResizeObserver?.observe(mapSection);
+    window.addEventListener('resize', refreshMapSize, { passive: true });
+    window.addEventListener('orientationchange', () => window.setTimeout(refreshMapSize, 180), { passive: true });
+    window.visualViewport?.addEventListener('resize', refreshMapSize, { passive: true });
+    window.setTimeout(refreshMapSize, 0);
     const routeLayer = L.layerGroup().addTo(map);
     const timelineHighlightLayer = L.layerGroup().addTo(map);
     const markerLayer = typeof L.markerClusterGroup === 'function'
@@ -406,7 +434,7 @@
       buttonText.textContent = busy
         ? '正在读取照片…'
         : (loadedPhotos.length ? '添加照片文件夹' : '选择照片文件夹');
-      singlePhotoButtonText.textContent = loadedPhotos.length ? '添加单张照片' : '选择单张照片';
+      singlePhotoButtonText.textContent = loadedPhotos.length ? '继续从相册添加' : '从相册选择照片';
       progressWrap.classList.toggle('hidden', !busy);
       if (!busy) progressBar.style.width = '0%';
     }
@@ -1207,7 +1235,8 @@
     }
 
     function isPhoto(file) {
-      return /\.(jpe?g|png|heic|heif)$/i.test(file.name);
+      return /\.(jpe?g|png|heic|heif)$/i.test(file.name)
+        || /^image\/(jpeg|png|heic|heif)$/i.test(file.type || '');
     }
 
     function photoIdentity(file) {
@@ -1457,22 +1486,37 @@
     }
 
     async function readExif(file) {
+      let data = null;
       try {
-        const data = await exifr.parse(file, { gps: true });
-        const lat = Number(data?.latitude);
-        const lng = Number(data?.longitude);
-        const hasLocation = Number.isFinite(lat) && Number.isFinite(lng)
-          && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
-        return {
-          lat: hasLocation ? lat : null,
-          lng: hasLocation ? lng : null,
-          hasLocation,
-          time: data.DateTimeOriginal || data.CreateDate || data.ModifyDate || null
-        };
+        data = await exifr.parse(file, { gps: true });
       } catch (error) {
         console.warn(`无法读取 ${file.name} 的 EXIF 信息`, error);
-        return { lat: null, lng: null, hasLocation: false, time: null };
       }
+
+      let lat = Number(data?.latitude);
+      let lng = Number(data?.longitude);
+      let hasLocation = Number.isFinite(lat) && Number.isFinite(lng)
+        && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+
+      // 某些手机相册返回的 HEIC/JPEG 需要通过 exifr 的 GPS 快捷解析器才能取到坐标。
+      if (!hasLocation && typeof exifr.gps === 'function') {
+        try {
+          const gps = await exifr.gps(file);
+          lat = Number(gps?.latitude);
+          lng = Number(gps?.longitude);
+          hasLocation = Number.isFinite(lat) && Number.isFinite(lng)
+            && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+        } catch (error) {
+          console.warn(`无法单独读取 ${file.name} 的 GPS 信息`, error);
+        }
+      }
+
+      return {
+        lat: hasLocation ? lat : null,
+        lng: hasLocation ? lng : null,
+        hasLocation,
+        time: data?.DateTimeOriginal || data?.CreateDate || data?.ModifyDate || null
+      };
     }
 
     async function addPhotos(photos) {
@@ -1666,13 +1710,21 @@
         if (points.length) {
           emptyState.classList.add('hidden');
           const bounds = L.latLngBounds(points);
-          if (points.length === 1) map.setView(points[0], 13);
-          else map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
           setupTimeline(markerRecords);
           drawChronologicalRoute(markerRecords);
           locatedCard.disabled = false;
           status.textContent = `读取完成：${points.length} 张有位置，${noLocationRecords.length} 张没有位置。`;
+          window.setTimeout(() => {
+            refreshMapSize();
+            if (points.length === 1) map.setView(points[0], 13);
+            else map.fitBounds(bounds, { padding: [24, 24], maxZoom: 15 });
+            revealMapOnMobile();
+          }, 100);
         } else {
+          // 即使照片没有 GPS，也显示可操作的底图，而不是继续用空状态遮住地图。
+          emptyState.classList.add('hidden');
+          map.setView([30, 105], 4);
+          window.setTimeout(revealMapOnMobile, 100);
           status.textContent = `读取完成：${photos.length} 张照片均没有位置信息，可点击上方统计卡片查看。`;
         }
     }
@@ -1703,7 +1755,7 @@
           status.textContent = '已取消选择文件夹。';
         } else {
           console.error(error);
-          status.innerHTML = `<span class="font-semibold text-red-700">读取失败：</span>${escapeHtml(error?.message || error)}。请重新点击绿色按钮，或尝试选择单张照片。`;
+          status.innerHTML = `<span class="font-semibold text-red-700">读取失败：</span>${escapeHtml(error?.message || error)}。请重新点击绿色按钮，或直接从相册批量选择照片。`;
         }
       } finally {
         setBusy(false);
@@ -1727,13 +1779,14 @@
     }
 
     async function processSinglePhoto(event) {
-      const file = event.target.files?.[0];
-      if (!file) return;
+      const selectedFiles = Array.from(event.target.files || []);
+      if (!selectedFiles.length) return;
+      const photos = selectedFiles.filter(isPhoto);
 
       try {
         setBusy(true);
-        status.textContent = `正在读取照片：${file.name}`;
-        await addPhotos(isPhoto(file) ? [file] : []);
+        status.textContent = `已从相册选择 ${selectedFiles.length} 张照片，正在读取…`;
+        await addPhotos(photos);
       } catch (error) {
         console.error(error);
         status.innerHTML = `<span class="font-semibold text-red-700">读取失败：</span>${escapeHtml(error?.message || error)}。`;
