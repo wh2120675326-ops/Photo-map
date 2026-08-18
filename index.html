@@ -60,7 +60,11 @@
           <button id="singlePhotoButton" type="button"
             class="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-teal-700 bg-white px-4 py-3 text-sm font-semibold text-teal-800 transition hover:bg-teal-50 focus:outline-none focus:ring-4 focus:ring-teal-100 disabled:cursor-not-allowed disabled:text-slate-400">
             <span aria-hidden="true">🖼️</span>
-            选择单张照片
+            <span id="singlePhotoButtonText">选择单张照片</span>
+          </button>
+          <button id="clearSelectionButton" type="button"
+            class="hidden min-h-12 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-4 focus:ring-red-100">
+            清空已选
           </button>
           <input id="folderInput" class="hidden" type="file" webkitdirectory directory multiple
             accept=".jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic,image/heif" />
@@ -178,6 +182,8 @@
     const chooseButton = document.getElementById('chooseButton');
     const folderInput = document.getElementById('folderInput');
     const singlePhotoButton = document.getElementById('singlePhotoButton');
+    const singlePhotoButtonText = document.getElementById('singlePhotoButtonText');
+    const clearSelectionButton = document.getElementById('clearSelectionButton');
     const singlePhotoInput = document.getElementById('singlePhotoInput');
     const buttonText = document.getElementById('buttonText');
     const totalCount = document.getElementById('totalCount');
@@ -226,11 +232,16 @@
     let galleryObserver = null;
     let currentViewerIndex = -1;
     let viewerLoadToken = 0;
+    let loadedPhotos = [];
 
     function setBusy(busy) {
       chooseButton.disabled = busy;
       singlePhotoButton.disabled = busy;
-      buttonText.textContent = busy ? '正在读取照片…' : '重新选择文件夹';
+      clearSelectionButton.disabled = busy;
+      buttonText.textContent = busy
+        ? '正在读取照片…'
+        : (loadedPhotos.length ? '添加照片文件夹' : '选择照片文件夹');
+      singlePhotoButtonText.textContent = loadedPhotos.length ? '添加单张照片' : '选择单张照片';
       progressWrap.classList.toggle('hidden', !busy);
       if (!busy) progressBar.style.width = '0%';
     }
@@ -379,6 +390,10 @@
 
     function isPhoto(file) {
       return /\.(jpe?g|png|heic|heif)$/i.test(file.name);
+    }
+
+    function photoIdentity(file) {
+      return `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
     }
 
     function isHeic(file) {
@@ -625,6 +640,56 @@
       }
     }
 
+    async function addPhotos(photos) {
+      if (!photos.length) {
+        status.textContent = '本次选择中没有找到支持的照片。已有照片保持不变。';
+        return;
+      }
+
+      const existingKeys = new Set(loadedPhotos.map(photoIdentity));
+      const addedPhotos = photos.filter(file => {
+        const key = photoIdentity(file);
+        if (existingKeys.has(key)) return false;
+        existingKeys.add(key);
+        return true;
+      });
+
+      if (!addedPhotos.length) {
+        status.textContent = `没有新增照片：所选的 ${photos.length} 张照片已存在。`;
+        return;
+      }
+
+      loadedPhotos.push(...addedPhotos);
+      clearSelectionButton.classList.remove('hidden');
+      clearSelectionButton.classList.add('inline-flex');
+      await displayPhotos(loadedPhotos);
+      status.textContent += ` 本次新增 ${addedPhotos.length} 张，当前共 ${loadedPhotos.length} 张。`;
+    }
+
+    function clearSelectedPhotos() {
+      releaseMedia();
+      closeGallery();
+      loadedPhotos = [];
+      markerLayer.clearLayers();
+      currentMarkerRecords = [];
+      timelineGroups = [];
+      noLocationRecords = [];
+      timelinePanel.classList.add('hidden');
+      emptyState.classList.remove('hidden');
+      totalCount.textContent = '0';
+      locatedCount.textContent = '0';
+      noLocationCount.textContent = '0';
+      locatedCard.disabled = true;
+      noLocationCard.disabled = true;
+      clearSelectionButton.classList.add('hidden');
+      clearSelectionButton.classList.remove('inline-flex');
+      folderInput.value = '';
+      singlePhotoInput.value = '';
+      map.setView([30, 105], 4);
+      status.textContent = '已清空所选照片，可以重新添加照片或文件夹。';
+      setBusy(false);
+    }
+
     async function displayPhotos(photos) {
         releaseMedia();
         markerLayer.clearLayers();
@@ -775,7 +840,7 @@
         setBusy(true);
         status.textContent = '已获得文件夹权限，正在查找照片…';
         const photos = await collectPhotos(directory);
-        await displayPhotos(photos);
+        await addPhotos(photos);
       } catch (error) {
         if (error?.name === 'AbortError') {
           status.textContent = '已取消选择文件夹。';
@@ -794,7 +859,7 @@
       try {
         setBusy(true);
         status.textContent = `已选择 ${event.target.files.length} 个文件，正在筛选照片…`;
-        await displayPhotos(photos);
+        await addPhotos(photos);
       } catch (error) {
         console.error(error);
         status.innerHTML = `<span class="font-semibold text-red-700">读取失败：</span>${escapeHtml(error?.message || error)}。`;
@@ -811,7 +876,7 @@
       try {
         setBusy(true);
         status.textContent = `正在读取照片：${file.name}`;
-        await displayPhotos(isPhoto(file) ? [file] : []);
+        await addPhotos(isPhoto(file) ? [file] : []);
       } catch (error) {
         console.error(error);
         status.innerHTML = `<span class="font-semibold text-red-700">读取失败：</span>${escapeHtml(error?.message || error)}。`;
@@ -825,6 +890,7 @@
     folderInput.addEventListener('change', processFallback);
     singlePhotoButton.addEventListener('click', () => singlePhotoInput.click());
     singlePhotoInput.addEventListener('change', processSinglePhoto);
+    clearSelectionButton.addEventListener('click', clearSelectedPhotos);
     timelineSlider.addEventListener('input', event => showTimelineDate(Number(event.target.value)));
     showAllButton.addEventListener('click', showAllMarkers);
     fullscreenButton.addEventListener('click', toggleMapFullscreen);
