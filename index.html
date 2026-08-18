@@ -13,6 +13,7 @@
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin=""></script>
   <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/heic-to@1.5.2/dist/iife/heic-to.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <style>
     html, body { height: 100%; }
@@ -48,6 +49,18 @@
     }
     .photo-marker-cluster strong { font-size: 14px; font-weight: 800; }
     .photo-marker-cluster span { font-size: 10px; font-weight: 700; opacity: 0.9; }
+    .photo-marker-cluster.timeline-selected-cluster {
+      background: rgb(245 158 11 / 0.35);
+      box-shadow: 0 0 0 5px rgb(245 158 11 / 0.28), 0 2px 10px rgb(15 23 42 / 0.28);
+    }
+    @media print {
+      body * { visibility: hidden !important; }
+      #reportModal, #reportModal * { visibility: visible !important; }
+      #reportModal { position: absolute !important; inset: 0 !important; display: block !important; background: white !important; padding: 0 !important; }
+      #reportModal > div { max-height: none !important; max-width: none !important; box-shadow: none !important; }
+      .report-no-print { display: none !important; }
+      #reportContent { overflow: visible !important; }
+    }
     @media (max-width: 640px) {
       #map { min-height: 430px; height: calc(100vh - 22rem); }
     }
@@ -79,6 +92,11 @@
           <button id="clearSelectionButton" type="button"
             class="hidden min-h-12 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-4 focus:ring-red-100">
             清空已选
+          </button>
+          <button id="reportButton" type="button"
+            class="hidden min-h-12 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-slate-200 disabled:cursor-not-allowed disabled:bg-slate-400">
+            <span aria-hidden="true">📊</span>
+            生成足迹报告
           </button>
           <input id="folderInput" class="hidden" type="file" webkitdirectory directory multiple
             accept=".jpg,.jpeg,.png,.heic,.heif,image/jpeg,image/png,image/heic,image/heif" />
@@ -187,11 +205,58 @@
         <div class="min-w-0">
           <p id="photoViewerName" class="break-all font-bold text-slate-900"></p>
           <p id="photoViewerDate" class="mt-1 text-sm text-slate-500"></p>
+          <p id="photoViewerNote" class="mt-2 whitespace-pre-wrap break-words text-sm text-amber-800"></p>
         </div>
         <div class="shrink-0 text-right">
           <p id="photoViewerPosition" class="text-sm font-semibold tabular-nums text-slate-700"></p>
           <p class="mt-1 hidden text-xs text-slate-400 sm:block">方向键切换</p>
+          <button id="toggleViewerReportButton" type="button" class="mt-2 block w-full rounded-lg bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-800 transition hover:opacity-90 focus:outline-none focus:ring-4 focus:ring-teal-100">加入足迹报告</button>
+          <button id="editViewerNoteButton" type="button" class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 focus:outline-none focus:ring-4 focus:ring-amber-100">添加备注</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="noteModal" class="fixed inset-0 z-[2300] hidden items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="noteModalTitle">
+    <div class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h2 id="noteModalTitle" class="text-lg font-bold text-slate-900">添加备注</h2>
+          <p id="noteModalSubtitle" class="mt-1 break-all text-sm text-slate-500"></p>
+        </div>
+        <button id="closeNoteModal" type="button" class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xl text-slate-600 hover:bg-slate-200" aria-label="关闭备注编辑">×</button>
+      </div>
+      <label for="noteTextarea" class="mt-5 block text-sm font-semibold text-slate-700">批注或备注</label>
+      <textarea id="noteTextarea" rows="5" maxlength="1000" placeholder="写下关于这张照片或这个区域的备注…" class="mt-2 w-full resize-y rounded-xl border border-slate-300 px-3 py-3 text-sm leading-6 text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-4 focus:ring-amber-100"></textarea>
+      <label id="noteReportOption" class="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-teal-200 bg-teal-50 px-4 py-3">
+        <input id="noteIncludeInReport" type="checkbox" class="mt-0.5 h-4 w-4 shrink-0 rounded border-teal-300 text-teal-700 focus:ring-teal-600" />
+        <span>
+          <span class="block text-sm font-semibold text-teal-900">在足迹报告中显示这张照片</span>
+          <span class="mt-0.5 block text-xs leading-5 text-teal-700">选中后，报告会同时显示拍摄日期和这条批注。默认不选中。</span>
+        </span>
+      </label>
+      <div class="mt-4 flex flex-wrap justify-end gap-2">
+        <button id="deleteNoteButton" type="button" class="mr-auto hidden rounded-lg px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">删除备注</button>
+        <button id="cancelNoteButton" type="button" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">取消</button>
+        <button id="saveNoteButton" type="button" class="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 focus:outline-none focus:ring-4 focus:ring-amber-100">保存备注</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="reportModal" class="fixed inset-0 z-[2400] hidden items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true" aria-labelledby="reportTitle">
+    <div class="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div class="report-no-print flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4">
+        <div>
+          <h2 id="reportTitle" class="text-lg font-bold text-slate-900">相册足迹总结报告</h2>
+          <p class="mt-0.5 text-sm text-slate-500">根据当前已选照片在本地生成</p>
+        </div>
+        <button id="closeReportModal" type="button" class="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-xl text-slate-600 hover:bg-slate-200" aria-label="关闭报告">×</button>
+      </div>
+      <div id="reportContent" class="overflow-y-auto px-5 py-6 sm:px-8"></div>
+      <div class="report-no-print flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+        <p id="reportSelectionSummary" class="mr-auto rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">未选择在报告中显示的照片</p>
+        <button id="downloadReportButton" type="button" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">下载 HTML</button>
+        <button id="exportPdfButton" type="button" class="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-wait disabled:bg-slate-400">导出 PDF</button>
       </div>
     </div>
   </div>
@@ -202,6 +267,7 @@
     const singlePhotoButton = document.getElementById('singlePhotoButton');
     const singlePhotoButtonText = document.getElementById('singlePhotoButtonText');
     const clearSelectionButton = document.getElementById('clearSelectionButton');
+    const reportButton = document.getElementById('reportButton');
     const singlePhotoInput = document.getElementById('singlePhotoInput');
     const buttonText = document.getElementById('buttonText');
     const totalCount = document.getElementById('totalCount');
@@ -237,13 +303,34 @@
     const photoViewerName = document.getElementById('photoViewerName');
     const photoViewerDate = document.getElementById('photoViewerDate');
     const photoViewerPosition = document.getElementById('photoViewerPosition');
+    const photoViewerNote = document.getElementById('photoViewerNote');
+    const toggleViewerReportButton = document.getElementById('toggleViewerReportButton');
+    const editViewerNoteButton = document.getElementById('editViewerNoteButton');
+    const noteModal = document.getElementById('noteModal');
+    const noteModalTitle = document.getElementById('noteModalTitle');
+    const noteModalSubtitle = document.getElementById('noteModalSubtitle');
+    const noteTextarea = document.getElementById('noteTextarea');
+    const noteReportOption = document.getElementById('noteReportOption');
+    const noteIncludeInReport = document.getElementById('noteIncludeInReport');
+    const closeNoteModalButton = document.getElementById('closeNoteModal');
+    const cancelNoteButton = document.getElementById('cancelNoteButton');
+    const saveNoteButton = document.getElementById('saveNoteButton');
+    const deleteNoteButton = document.getElementById('deleteNoteButton');
+    const reportModal = document.getElementById('reportModal');
+    const reportContent = document.getElementById('reportContent');
+    const closeReportModalButton = document.getElementById('closeReportModal');
+    const downloadReportButton = document.getElementById('downloadReportButton');
+    const exportPdfButton = document.getElementById('exportPdfButton');
+    const reportSelectionSummary = document.getElementById('reportSelectionSummary');
 
+    let selectedTimelineMarkers = new Set();
     const map = L.map('map', { zoomControl: true }).setView([30, 105], 4);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
     const routeLayer = L.layerGroup().addTo(map);
+    const timelineHighlightLayer = L.layerGroup().addTo(map);
     const markerLayer = typeof L.markerClusterGroup === 'function'
       ? L.markerClusterGroup({
           chunkedLoading: true,
@@ -251,16 +338,17 @@
           chunkDelay: 30,
           maxClusterRadius: 70,
           showCoverageOnHover: false,
-          zoomToBoundsOnClick: true,
+          zoomToBoundsOnClick: false,
           spiderfyOnMaxZoom: true,
           spiderfyDistanceMultiplier: 1.5,
           removeOutsideVisibleBounds: true,
           iconCreateFunction(cluster) {
             const count = cluster.getChildCount();
+            const hasSelectedPhoto = cluster.getAllChildMarkers().some(marker => selectedTimelineMarkers.has(marker));
             const size = count < 10 ? 42 : count < 100 ? 50 : 58;
             return L.divIcon({
               html: `<div><strong>${count}</strong><span>张</span></div>`,
-              className: 'photo-marker-cluster',
+              className: `photo-marker-cluster${hasSelectedPhoto ? ' timeline-selected-cluster' : ''}`,
               iconSize: [size, size]
             });
           }
@@ -269,26 +357,52 @@
     if (typeof L.markerClusterGroup === 'function') {
       markerLayer.on('clustermouseover', event => {
         const cluster = event.layer;
-        const content = `该区域有 ${cluster.getChildCount()} 张照片`;
+        const content = `该区域有 ${cluster.getChildCount()} 张照片 · 点击选择操作`;
         if (cluster.getTooltip()) cluster.setTooltipContent(content);
         else cluster.bindTooltip(content, { direction: 'top', offset: [0, -8] });
         cluster.openTooltip();
       });
       markerLayer.on('clustermouseout', event => event.layer.closeTooltip());
+      markerLayer.on('clusterclick', event => {
+        event.layer.closeTooltip();
+        openClusterActions(event.layer);
+      });
     }
+    const areaNoteLayer = L.layerGroup().addTo(map);
+    map.on('click', event => {
+      if (typeof markerLayer.unspiderfy !== 'function') return;
+      const target = event.originalEvent?.target;
+      if (target instanceof Element && target.closest('.leaflet-marker-icon, .leaflet-popup, .leaflet-interactive')) return;
+      markerLayer.unspiderfy();
+    });
     let currentMarkerRecords = [];
     let timelineGroups = [];
     let noLocationRecords = [];
     let activeGalleryRecords = [];
     let galleryObserver = null;
     let currentViewerIndex = -1;
+    let currentViewerRecord = null;
     let viewerLoadToken = 0;
     let loadedPhotos = [];
+    let currentReportBodyHtml = '';
+    let reportGenerationToken = 0;
+    const reportIncludedPhotoIds = new Set();
+    let activeNoteTarget = null;
+    let photoRecordSequence = 0;
+    const photoRecordById = new Map();
+    const PHOTO_NOTES_STORAGE_KEY = 'photo-footprint-photo-notes-v1';
+    const AREA_NOTES_STORAGE_KEY = 'photo-footprint-area-notes-v1';
+    const storedPhotoNotes = readStoredValue(PHOTO_NOTES_STORAGE_KEY, {});
+    const photoNotes = storedPhotoNotes && typeof storedPhotoNotes === 'object' && !Array.isArray(storedPhotoNotes) ? storedPhotoNotes : {};
+    const storedAreaNotes = readStoredValue(AREA_NOTES_STORAGE_KEY, []);
+    let areaNotes = Array.isArray(storedAreaNotes) ? storedAreaNotes : [];
+    const markerRecordLookup = new WeakMap();
 
     function setBusy(busy) {
       chooseButton.disabled = busy;
       singlePhotoButton.disabled = busy;
       clearSelectionButton.disabled = busy;
+      reportButton.disabled = busy;
       buttonText.textContent = busy
         ? '正在读取照片…'
         : (loadedPhotos.length ? '添加照片文件夹' : '选择照片文件夹');
@@ -301,6 +415,270 @@
       return String(value).replace(/[&<>'"]/g, char => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
       })[char]);
+    }
+
+    function readStoredValue(key, fallback) {
+      try {
+        const value = JSON.parse(localStorage.getItem(key));
+        return value ?? fallback;
+      } catch (error) {
+        return fallback;
+      }
+    }
+
+    function writeStoredValue(key, value) {
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+      } catch (error) {
+        console.warn('无法保存本地备注', error);
+        status.textContent = '备注仅在本次打开期间有效：浏览器禁止了本地存储。';
+      }
+    }
+
+    function getPhotoNote(file) {
+      return photoNotes[photoIdentity(file)] || '';
+    }
+
+    function isPhotoIncludedInReport(file) {
+      return reportIncludedPhotoIds.has(photoIdentity(file));
+    }
+
+    function refreshReportSelectionSummary() {
+      const selectedCount = loadedPhotos.filter(file => isPhotoIncludedInReport(file)).length;
+      reportSelectionSummary.textContent = selectedCount
+        ? `已选择 ${selectedCount} 张照片在报告中显示`
+        : '未选择在报告中显示的照片';
+    }
+
+    function refreshViewerReportButton(record) {
+      const included = isPhotoIncludedInReport(record.file);
+      toggleViewerReportButton.textContent = included ? '✓ 已加入报告（点击取消）' : '加入足迹报告';
+      toggleViewerReportButton.setAttribute('aria-pressed', String(included));
+      toggleViewerReportButton.classList.toggle('bg-teal-700', included);
+      toggleViewerReportButton.classList.toggle('text-white', included);
+      toggleViewerReportButton.classList.toggle('bg-teal-50', !included);
+      toggleViewerReportButton.classList.toggle('text-teal-800', !included);
+    }
+
+    function setPhotoReportInclusion(record, included) {
+      const key = photoIdentity(record.file);
+      if (included) reportIncludedPhotoIds.add(key);
+      else reportIncludedPhotoIds.delete(key);
+      currentReportBodyHtml = '';
+      refreshReportSelectionSummary();
+      if (record.marker) record.marker.setPopupContent(popupContent(record, !record.displayUrl));
+      if (currentViewerRecord === record) refreshViewerReportButton(record);
+      status.textContent = included
+        ? `已将 ${record.file.name} 加入足迹报告；报告会显示照片、拍摄日期和批注。`
+        : `已取消在足迹报告中显示 ${record.file.name}。`;
+    }
+
+    function refreshViewerNote(record) {
+      const note = getPhotoNote(record.file);
+      photoViewerNote.textContent = note ? `备注：${note}` : '暂无备注';
+      photoViewerNote.classList.toggle('text-slate-400', !note);
+      photoViewerNote.classList.toggle('text-amber-800', Boolean(note));
+      editViewerNoteButton.textContent = note ? '编辑备注' : '添加备注';
+      refreshViewerReportButton(record);
+    }
+
+    function closeNoteEditor() {
+      noteModal.classList.add('hidden');
+      noteModal.classList.remove('flex');
+      activeNoteTarget = null;
+      const otherOverlayOpen = !photoViewer.classList.contains('hidden')
+        || !noLocationModal.classList.contains('hidden')
+        || mapSection.classList.contains('map-fullscreen-fallback');
+      if (!otherOverlayOpen) document.body.classList.remove('overflow-hidden');
+    }
+
+    async function showNoteEditor({ title, subtitle, value, target }) {
+      const nativeElement = document.fullscreenElement || document.webkitFullscreenElement;
+      if (nativeElement === mapSection) {
+        const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exitFullscreen) {
+          try { await exitFullscreen.call(document); } catch (error) { console.warn(error); }
+        }
+      } else if (mapSection.classList.contains('map-fullscreen-fallback')) {
+        setFallbackFullscreen(false);
+      }
+      activeNoteTarget = target;
+      noteModalTitle.textContent = title;
+      noteModalSubtitle.textContent = subtitle;
+      noteTextarea.value = value || '';
+      const isPhotoTarget = target?.type === 'photo';
+      noteReportOption.classList.toggle('hidden', !isPhotoTarget);
+      noteIncludeInReport.checked = isPhotoTarget && isPhotoIncludedInReport(target.record.file);
+      deleteNoteButton.classList.toggle('hidden', !value);
+      noteModal.classList.remove('hidden');
+      noteModal.classList.add('flex');
+      document.body.classList.add('overflow-hidden');
+      window.setTimeout(() => noteTextarea.focus(), 50);
+    }
+
+    function openPhotoNoteEditor(record) {
+      showNoteEditor({
+        title: getPhotoNote(record.file) ? '编辑照片备注' : '添加照片备注',
+        subtitle: record.file.name,
+        value: getPhotoNote(record.file),
+        target: { type: 'photo', record }
+      });
+    }
+
+    function openAreaNoteEditor(cluster) {
+      const center = cluster.getLatLng();
+      const count = cluster.getChildCount();
+      showNoteEditor({
+        title: '在聚合处添加备注',
+        subtitle: `该区域包含 ${count} 张照片`,
+        value: '',
+        target: { type: 'area-new', lat: center.lat, lng: center.lng, count }
+      });
+    }
+
+    function openExistingAreaNote(note) {
+      showNoteEditor({
+        title: '编辑区域备注',
+        subtitle: note.count ? `创建时包含 ${note.count} 张照片` : '地图区域备注',
+        value: note.text,
+        target: { type: 'area', note }
+      });
+    }
+
+    function renderAreaNotes() {
+      areaNoteLayer.clearLayers();
+      for (const note of areaNotes) {
+        if (!Number.isFinite(note.lat) || !Number.isFinite(note.lng)) continue;
+        const marker = L.marker([note.lat, note.lng], {
+          icon: L.divIcon({
+            className: '',
+            html: '<div class="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-amber-500 text-lg shadow-lg">📝</div>',
+            iconSize: [40, 40],
+            iconAnchor: [20, 20]
+          }),
+          zIndexOffset: 2000
+        });
+        marker.bindPopup(`
+          <div class="w-56">
+            <p class="text-xs font-semibold uppercase tracking-wide text-amber-700">区域备注</p>
+            <p class="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">${escapeHtml(note.text)}</p>
+            <button type="button" data-area-note-id="${escapeHtml(note.id)}" class="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">编辑备注</button>
+          </div>
+        `);
+        marker.addTo(areaNoteLayer);
+      }
+    }
+
+    function saveActiveNote() {
+      if (!activeNoteTarget) return;
+      const text = noteTextarea.value.trim();
+
+      if (activeNoteTarget.type === 'photo') {
+        const record = activeNoteTarget.record;
+        const key = photoIdentity(record.file);
+        if (text) photoNotes[key] = text;
+        else delete photoNotes[key];
+        writeStoredValue(PHOTO_NOTES_STORAGE_KEY, photoNotes);
+        setPhotoReportInclusion(record, noteIncludeInReport.checked);
+        if (record.marker) record.marker.setPopupContent(popupContent(record));
+        if (currentViewerRecord === record) refreshViewerNote(record);
+      } else if (activeNoteTarget.type === 'area-new') {
+        if (text) {
+          areaNotes.push({
+            id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+            lat: activeNoteTarget.lat,
+            lng: activeNoteTarget.lng,
+            count: activeNoteTarget.count,
+            text
+          });
+          writeStoredValue(AREA_NOTES_STORAGE_KEY, areaNotes);
+          renderAreaNotes();
+        }
+      } else if (activeNoteTarget.type === 'area') {
+        activeNoteTarget.note.text = text;
+        if (!text) areaNotes = areaNotes.filter(note => note.id !== activeNoteTarget.note.id);
+        writeStoredValue(AREA_NOTES_STORAGE_KEY, areaNotes);
+        renderAreaNotes();
+      }
+
+      if (activeNoteTarget.type === 'photo') {
+        status.textContent = text
+          ? '照片批注已保存在本地浏览器，报告显示设置已更新。'
+          : '照片批注已清空，报告显示设置已更新。';
+      } else {
+        status.textContent = text ? '备注已保存在本地浏览器。' : '备注已删除。';
+      }
+      closeNoteEditor();
+    }
+
+    function deleteActiveNote() {
+      if (!activeNoteTarget) return;
+      noteTextarea.value = '';
+      saveActiveNote();
+    }
+
+    function openClusterActions(cluster) {
+      const records = cluster.getAllChildMarkers()
+        .map(marker => markerRecordLookup.get(marker))
+        .filter(Boolean);
+      if (!records.length) return;
+
+      const panel = document.createElement('div');
+      panel.className = 'w-56 py-1';
+
+      const heading = document.createElement('p');
+      heading.className = 'text-sm font-bold text-slate-900';
+      heading.textContent = `该区域有 ${records.length} 张照片`;
+
+      const hint = document.createElement('p');
+      hint.className = 'mt-1 text-xs text-slate-500';
+      hint.textContent = '请选择查看方式';
+
+      const actions = document.createElement('div');
+      actions.className = 'mt-3 grid gap-2';
+
+      const galleryButton = document.createElement('button');
+      galleryButton.type = 'button';
+      galleryButton.className = 'w-full rounded-lg bg-teal-700 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-800 focus:outline-none focus:ring-4 focus:ring-teal-100';
+      galleryButton.textContent = '查看该区域照片';
+      galleryButton.addEventListener('click', async () => {
+        map.closePopup();
+        const nativeElement = document.fullscreenElement || document.webkitFullscreenElement;
+        if (nativeElement === mapSection) {
+          const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
+          if (exitFullscreen) await exitFullscreen.call(document);
+        } else if (mapSection.classList.contains('map-fullscreen-fallback')) {
+          setFallbackFullscreen(false);
+        }
+        openPhotoGallery(records, `该区域的照片（${records.length} 张）`);
+      });
+
+      const areaNoteButton = document.createElement('button');
+      areaNoteButton.type = 'button';
+      areaNoteButton.className = 'w-full rounded-lg bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 focus:outline-none focus:ring-4 focus:ring-amber-100';
+      areaNoteButton.textContent = '在聚合处添加备注';
+      areaNoteButton.addEventListener('click', () => {
+        map.closePopup();
+        openAreaNoteEditor(cluster);
+      });
+
+      const markersButton = document.createElement('button');
+      markersButton.type = 'button';
+      markersButton.className = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-200';
+      markersButton.textContent = '展开并标记单张照片';
+      markersButton.addEventListener('click', () => {
+        map.closePopup();
+        cluster.spiderfy();
+      });
+
+      actions.append(galleryButton, areaNoteButton, markersButton);
+      panel.append(heading, hint, actions);
+      L.DomEvent.disableClickPropagation(panel);
+
+      L.popup({ minWidth: 230, maxWidth: 280, closeButton: true })
+        .setLatLng(cluster.getLatLng())
+        .setContent(panel)
+        .openOn(map);
     }
 
     function formatDate(value) {
@@ -419,27 +797,348 @@
       }
     }
 
-    function showTimelineDate(index) {
+    async function createReportImage(record, maxSize = 1920) {
+      await ensureMedia(record);
+      const image = new Image();
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = () => reject(new Error('浏览器无法读取报告用高清图片'));
+        image.src = record.displayUrl;
+      });
+
+      const scale = Math.min(1, maxSize / image.naturalWidth, maxSize / image.naturalHeight);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext('2d');
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+      // 报告使用最长边不超过 1920px 的高质量 JPEG，清晰度高于预览图，但不会直接嵌入超大的原图。
+      return canvas.toDataURL('image/jpeg', 0.88);
+    }
+
+    async function prepareReportPhotos(records, token) {
+      const orderedRecords = [...records].sort((a, b) => {
+        const aTime = a.date instanceof Date ? a.date.getTime() : NaN;
+        const bTime = b.date instanceof Date ? b.date.getTime() : NaN;
+        const aHasDate = Number.isFinite(aTime);
+        const bHasDate = Number.isFinite(bTime);
+        if (aHasDate !== bHasDate) return aHasDate ? -1 : 1;
+        if (aHasDate && aTime !== bTime) return aTime - bTime;
+        return a.file.name.localeCompare(b.file.name, 'zh-CN', { numeric: true });
+      });
+      const prepared = [];
+
+      for (let index = 0; index < orderedRecords.length; index++) {
+        if (token !== reportGenerationToken) return [];
+        const record = orderedRecords[index];
+        reportContent.innerHTML = `<div class="flex min-h-64 flex-col items-center justify-center text-center"><p class="text-3xl">🖼️</p><p class="mt-3 font-semibold text-slate-800">正在准备报告高清照片</p><p class="mt-1 text-sm text-slate-500">${index + 1} / ${orderedRecords.length}</p></div>`;
+        let imageUrl = null;
+        try {
+          imageUrl = await createReportImage(record);
+        } catch (error) {
+          console.warn(`无法将 ${record.file.name} 加入报告`, error);
+        }
+        prepared.push({ record, imageUrl, note: getPhotoNote(record.file) });
+        if ((index + 1) % 4 === 0) await new Promise(requestAnimationFrame);
+      }
+      return prepared;
+    }
+
+    function buildFootprintReport({ reportPhotos = [] } = {}) {
+      const allRecords = [...currentMarkerRecords, ...noLocationRecords];
+      const datedRecords = allRecords
+        .filter(record => record.date instanceof Date && Number.isFinite(record.date.getTime()))
+        .sort((a, b) => a.date - b.date);
+      const locatedDatedRecords = currentMarkerRecords
+        .filter(record => record.date instanceof Date && Number.isFinite(record.date.getTime()))
+        .sort((a, b) => a.date - b.date);
+      const generatedAt = new Intl.DateTimeFormat('zh-CN', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false
+      }).format(new Date());
+      const earliestDate = datedRecords.length ? formatDate(datedRecords[0].date) : '未知';
+      const latestDate = datedRecords.length ? formatDate(datedRecords[datedRecords.length - 1].date) : '未知';
+      const uniquePoints = new Set(currentMarkerRecords.map(record => `${record.lat.toFixed(3)},${record.lng.toFixed(3)}`)).size;
+
+      const dayGroups = new Map();
+      for (const record of allRecords) {
+        const day = record.date ? formatDate(record.date) : '拍摄日期未知';
+        if (!dayGroups.has(day)) dayGroups.set(day, { total: 0, located: 0, unlocated: 0 });
+        const group = dayGroups.get(day);
+        group.total += 1;
+        if (record.marker) group.located += 1;
+        else group.unlocated += 1;
+      }
+      const dayRows = Array.from(dayGroups.entries()).sort(([a], [b]) => {
+        if (a === '拍摄日期未知') return 1;
+        if (b === '拍摄日期未知') return -1;
+        return a.localeCompare(b);
+      });
+
+      let totalConnectionDistance = 0;
+      let continuousConnections = 0;
+      const jumpConnections = [];
+      for (let index = 1; index < locatedDatedRecords.length; index++) {
+        const start = locatedDatedRecords[index - 1];
+        const end = locatedDatedRecords[index];
+        const distance = distanceInKilometers(start, end);
+        const gapHours = Math.abs(end.date - start.date) / 36e5;
+        totalConnectionDistance += distance;
+        if (distance > 800 || gapHours > 72) {
+          jumpConnections.push({ start, end, distance, gapHours });
+        } else {
+          continuousConnections += 1;
+        }
+      }
+
+      const validDays = dayRows.filter(([day]) => day !== '拍摄日期未知').length;
+
+      const dayTable = dayRows.map(([day, group]) => `
+        <tr class="border-t border-slate-200">
+          <td class="px-3 py-2.5 font-medium">${escapeHtml(day)}</td>
+          <td class="px-3 py-2.5 text-center">${group.total}</td>
+          <td class="px-3 py-2.5 text-center">${group.located}</td>
+          <td class="px-3 py-2.5 text-center">${group.unlocated}</td>
+        </tr>
+      `).join('');
+
+      const jumpList = jumpConnections.length ? jumpConnections.map(item => `
+        <li class="rounded-xl bg-amber-50 px-4 py-3">
+          <span class="font-semibold text-amber-900">${escapeHtml(item.start.photoDate)} → ${escapeHtml(item.end.photoDate)}</span>
+          <span class="mt-1 block text-sm text-amber-800">约 ${Math.round(item.distance)} km · 间隔 ${escapeHtml(formatTimeGap(item.gapHours))}</span>
+        </li>
+      `).join('') : '<li class="text-sm text-slate-500">没有检测到超过 800 km 或 72 小时的跳跃。</li>';
+
+      const photoCards = reportPhotos.map(item => `
+        <article class="report-photo-card overflow-hidden rounded-xl border border-slate-200 bg-white">
+          ${item.imageUrl
+            ? `<img src="${item.imageUrl}" alt="${escapeHtml(item.record.file.name)}" class="bg-slate-100 object-contain" style="display:block;width:auto;max-width:100%;height:auto;max-height:40rem;margin:0 auto;object-fit:contain;background:#f1f5f9" />`
+            : '<div class="flex h-44 items-center justify-center bg-slate-100 text-sm text-slate-500">照片预览不可用</div>'}
+          <div class="p-4">
+            <p class="break-all text-sm font-bold text-slate-900">${escapeHtml(item.record.file.name)}</p>
+            <p class="mt-1 text-sm text-slate-500">拍摄日期：${escapeHtml(item.record.photoDate)}</p>
+            ${item.note ? `
+              <div class="mt-3 rounded-lg bg-amber-50 px-3 py-2">
+                <p class="text-xs font-semibold text-amber-800">批注或备注</p>
+                <p class="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-amber-900">${escapeHtml(item.note)}</p>
+              </div>
+            ` : ''}
+          </div>
+        </article>
+      `).join('');
+
+      const detailsSection = reportPhotos.length ? `
+        <section class="mt-8">
+          <h2 class="text-xl font-bold text-slate-950">已选照片、日期与已有批注</h2>
+          <p class="mt-2 text-sm text-slate-500">以下 ${reportPhotos.length} 张照片由用户逐张选择，使用最长边不超过 1920px 的高清优化版本，并按拍摄时间从旧到新排列；拍摄时间未知的照片排在最后。</p>
+          <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">${photoCards}</div>
+        </section>
+      ` : '';
+
+      return `
+        <article class="mx-auto max-w-4xl text-slate-800">
+          <header class="border-b border-slate-200 pb-5">
+            <p class="text-sm font-semibold tracking-wide text-teal-700">PHOTO FOOTPRINT REPORT</p>
+            <h1 class="mt-1 text-3xl font-bold text-slate-950">相册足迹总结报告</h1>
+            <p class="mt-2 text-sm text-slate-500">生成时间：${escapeHtml(generatedAt)}</p>
+            <p class="mt-1 text-xs font-semibold text-slate-500">${reportPhotos.length ? `本报告包含 ${reportPhotos.length} 张已选高清照片及拍摄日期${reportPhotos.some(item => item.note) ? '，并显示已有批注' : ''}` : '本报告不包含照片与批注'}</p>
+          </header>
+
+          <section class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div class="rounded-xl bg-slate-100 p-4"><p class="text-xs text-slate-500">总照片</p><p class="mt-1 text-2xl font-bold">${loadedPhotos.length}</p></div>
+            <div class="rounded-xl bg-teal-50 p-4"><p class="text-xs text-teal-700">有位置</p><p class="mt-1 text-2xl font-bold text-teal-900">${currentMarkerRecords.length}</p></div>
+            <div class="rounded-xl bg-amber-50 p-4"><p class="text-xs text-amber-700">没有位置</p><p class="mt-1 text-2xl font-bold text-amber-900">${noLocationRecords.length}</p></div>
+            <div class="rounded-xl bg-sky-50 p-4"><p class="text-xs text-sky-700">拍摄天数</p><p class="mt-1 text-2xl font-bold text-sky-900">${validDays}</p></div>
+          </section>
+
+          <section class="mt-8">
+            <h2 class="text-xl font-bold text-slate-950">足迹概览</h2>
+            <p class="mt-3 leading-7 text-slate-600">本次足迹时间范围为 <strong>${escapeHtml(earliestDate)}</strong> 至 <strong>${escapeHtml(latestDate)}</strong>，包含约 <strong>${uniquePoints}</strong> 个拍摄点。时间连接线共 ${Math.max(0, locatedDatedRecords.length - 1)} 段，其中连续连接 ${continuousConnections} 段，跨区域或长时间跳跃 ${jumpConnections.length} 段。</p>
+            <p class="mt-2 text-sm text-slate-500">时间连接线累计直线距离约 ${Math.round(totalConnectionDistance).toLocaleString('zh-CN')} km。该数值仅为照片拍摄地点之间的直线连接总和，不代表实际旅行里程或路线。</p>
+          </section>
+
+          <section class="mt-8">
+            <h2 class="text-xl font-bold text-slate-950">按日期统计</h2>
+            <div class="mt-3 overflow-hidden rounded-xl border border-slate-200">
+              <table class="w-full border-collapse text-sm">
+                <thead class="bg-slate-100 text-slate-600"><tr><th class="px-3 py-2.5 text-left">日期</th><th class="px-3 py-2.5">照片</th><th class="px-3 py-2.5">有位置</th><th class="px-3 py-2.5">无位置</th></tr></thead>
+                <tbody>${dayTable}</tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="mt-8">
+            <h2 class="text-xl font-bold text-slate-950">跨区域 / 长间隔</h2>
+            <ul class="mt-3 grid gap-2">${jumpList}</ul>
+          </section>
+
+          ${detailsSection}
+
+          <footer class="mt-10 border-t border-slate-200 pt-4 text-xs leading-5 text-slate-500">本报告由相册足迹地图在本地浏览器中生成。照片未上传至服务器。</footer>
+        </article>
+      `;
+    }
+
+    async function refreshFootprintReport() {
+      if (!loadedPhotos.length) return;
+      const token = ++reportGenerationToken;
+      downloadReportButton.disabled = true;
+      exportPdfButton.disabled = true;
+      reportContent.innerHTML = '<div class="flex min-h-64 items-center justify-center text-sm text-slate-500">正在生成足迹报告…</div>';
+      const allRecords = [...currentMarkerRecords, ...noLocationRecords];
+      const selectedRecords = allRecords.filter(record => isPhotoIncludedInReport(record.file));
+      const reportPhotos = selectedRecords.length ? await prepareReportPhotos(selectedRecords, token) : [];
+      if (token !== reportGenerationToken) return;
+      currentReportBodyHtml = buildFootprintReport({ reportPhotos });
+      reportContent.innerHTML = currentReportBodyHtml;
+      refreshReportSelectionSummary();
+      downloadReportButton.disabled = false;
+      exportPdfButton.disabled = false;
+    }
+
+    function openFootprintReport() {
+      if (!loadedPhotos.length) return;
+      reportModal.classList.remove('hidden');
+      reportModal.classList.add('flex');
+      document.body.classList.add('overflow-hidden');
+      refreshFootprintReport();
+    }
+
+    function closeFootprintReport() {
+      reportGenerationToken += 1;
+      reportModal.classList.add('hidden');
+      reportModal.classList.remove('flex');
+      document.body.classList.remove('overflow-hidden');
+    }
+
+    function standaloneReportHtml() {
+      return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>相册足迹总结报告</title><style>
+        *{box-sizing:border-box}html{background:#fff}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:#1e293b;max-width:900px;margin:0 auto;padding:32px;line-height:1.6;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1,h2,p{margin-top:0}h1{font-size:30px}h2{font-size:20px;margin-bottom:0}img{max-width:100%}table{width:100%;border-collapse:collapse}th,td{border:1px solid #cbd5e1;padding:8px;text-align:left}ul{padding-left:20px}.grid{display:grid;gap:12px}.grid-cols-1{grid-template-columns:1fr}.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.gap-2{gap:8px}.gap-3{gap:12px}.gap-4{gap:16px}.rounded-lg{border-radius:8px}.rounded-xl{border-radius:12px}.overflow-hidden{overflow:hidden}.bg-white{background:#fff}.bg-slate-100{background:#f1f5f9}.bg-teal-50{background:#f0fdfa}.bg-amber-50{background:#fffbeb}.bg-sky-50{background:#f0f9ff}.text-slate-500{color:#64748b}.text-slate-600{color:#475569}.text-slate-800{color:#1e293b}.text-slate-900,.text-slate-950{color:#0f172a}.text-teal-700{color:#0f766e}.text-teal-900{color:#134e4a}.text-amber-700{color:#b45309}.text-amber-800{color:#92400e}.text-amber-900{color:#78350f}.text-sky-700{color:#0369a1}.text-sky-900{color:#0c4a6e}.p-4{padding:16px}.px-3{padding-left:12px;padding-right:12px}.px-4{padding-left:16px;padding-right:16px}.py-2{padding-top:8px;padding-bottom:8px}.py-3{padding-top:12px;padding-bottom:12px}.pb-5{padding-bottom:20px}.pt-4{padding-top:16px}.font-bold,.font-semibold{font-weight:700}.text-2xl{font-size:24px}.text-3xl{font-size:30px}.text-xl{font-size:20px}.text-sm{font-size:14px}.text-xs{font-size:12px}.leading-5{line-height:20px}.leading-6{line-height:24px}.leading-7{line-height:28px}.mt-1{margin-top:4px}.mt-2{margin-top:8px}.mt-3{margin-top:12px}.mt-4{margin-top:16px}.mt-6{margin-top:24px}.mt-8{margin-top:32px}.mt-10{margin-top:40px}.border,.border-t,.border-b{border:1px solid #e2e8f0}.border-t{border-width:1px 0 0}.border-b{border-width:0 0 1px}.whitespace-pre-wrap{white-space:pre-wrap}.break-words{overflow-wrap:anywhere}.report-photo-card{break-inside:avoid;page-break-inside:avoid}footer{break-inside:avoid}@media(min-width:640px){.sm\\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.sm\\:grid-cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}}@page{size:A4;margin:14mm}@media print{body{max-width:none;padding:0}.report-photo-card{break-inside:avoid;page-break-inside:avoid}}
+      </style></head><body>${currentReportBodyHtml}</body></html>`;
+    }
+
+    function downloadFootprintReport() {
+      if (!currentReportBodyHtml) return;
+      const documentHtml = standaloneReportHtml();
+      const url = URL.createObjectURL(new Blob([documentHtml], { type: 'text/html;charset=utf-8' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `相册足迹报告-${new Date().toISOString().slice(0, 10)}.html`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function waitForImagesIn(root) {
+      const images = Array.from(root.querySelectorAll('img'));
+      return Promise.all(images.map(image => image.complete
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            image.addEventListener('load', resolve, { once: true });
+            image.addEventListener('error', resolve, { once: true });
+          })));
+    }
+
+    async function exportFootprintPdf() {
+      if (!currentReportBodyHtml) return;
+      if (typeof window.html2pdf !== 'function') {
+        status.textContent = 'PDF 组件未加载，请检查网络连接后刷新页面。你仍可使用“下载 HTML”。';
+        return;
+      }
+
+      const originalLabel = exportPdfButton.textContent;
+      const exportBackdrop = document.createElement('div');
+      exportBackdrop.style.cssText = 'position:fixed;inset:0;z-index:5000;overflow:auto;background:#e2e8f0;padding:24px;';
+      const exportRoot = document.createElement('div');
+      // A4 减去左右各 10mm 页边距后的 CSS 像素宽度约为 718px。
+      exportRoot.style.cssText = 'position:relative;width:718px;margin:0 auto;padding:0;background:#fff;color:#1e293b;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.6;box-sizing:border-box;';
+      exportRoot.innerHTML = currentReportBodyHtml;
+      const photoCards = Array.from(exportRoot.querySelectorAll('.report-photo-card'));
+      for (const card of photoCards) {
+        card.style.breakInside = 'avoid';
+        card.style.pageBreakInside = 'avoid';
+        card.style.alignSelf = 'start';
+        const image = card.querySelector('img');
+        if (image) image.style.cssText = 'display:block;width:auto;max-width:100%;height:auto;max-height:300px;margin:0 auto;object-fit:contain;background:#f1f5f9;';
+      }
+      for (const grid of new Set(photoCards.map(card => card.parentElement).filter(Boolean))) {
+        grid.style.gridTemplateColumns = 'repeat(2, minmax(0, 1fr))';
+        grid.style.alignItems = 'start';
+      }
+      exportBackdrop.appendChild(exportRoot);
+      document.body.appendChild(exportBackdrop);
+      exportPdfButton.disabled = true;
+      downloadReportButton.disabled = true;
+      exportPdfButton.textContent = '正在生成 PDF…';
+
+      try {
+        await Promise.all([document.fonts?.ready || Promise.resolve(), waitForImagesIn(exportRoot)]);
+        await window.html2pdf().set({
+          margin: [10, 10, 12, 10],
+          filename: `相册足迹报告-${new Date().toISOString().slice(0, 10)}.pdf`,
+          image: { type: 'jpeg', quality: 0.95 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false, width: 718, windowWidth: 718, scrollX: 0, scrollY: 0 },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
+          pagebreak: { mode: ['css', 'legacy'], avoid: ['.report-photo-card'] }
+        }).from(exportRoot).save();
+        status.textContent = 'PDF 已生成并开始下载。';
+      } catch (error) {
+        console.error(error);
+        status.textContent = `PDF 导出失败：${error?.message || error}。你仍可使用“下载 HTML”。`;
+      } finally {
+        exportBackdrop.remove();
+        exportPdfButton.textContent = originalLabel;
+        exportPdfButton.disabled = false;
+        downloadReportButton.disabled = false;
+      }
+    }
+
+    function showTimelineDate(index, { navigate = true } = {}) {
       const group = timelineGroups[index];
       if (!group) return;
-      setVisibleMarkerRecords(group.items);
+
+      if (markerLayer.getLayers().length !== currentMarkerRecords.length) {
+        setVisibleMarkerRecords(currentMarkerRecords);
+      }
+      timelineSlider.value = String(index);
+      selectedTimelineMarkers = new Set(group.items.map(item => item.marker));
+      timelineHighlightLayer.clearLayers();
+      for (const item of group.items) {
+        L.circleMarker([item.lat, item.lng], {
+          radius: 18,
+          color: '#f59e0b',
+          weight: 4,
+          opacity: 0.9,
+          fill: false,
+          interactive: false
+        }).addTo(timelineHighlightLayer);
+      }
+      if (typeof markerLayer.refreshClusters === 'function') markerLayer.refreshClusters();
 
       timelineCurrent.textContent = `${group.date} · ${group.items.length} 个地点戳`;
+      if (!navigate) return;
       const bounds = L.latLngBounds(group.items.map(item => [item.lat, item.lng]));
       if (group.items.length === 1) {
         const record = group.items[0];
         map.setView([record.lat, record.lng], Math.max(map.getZoom(), 12));
-        record.marker.openPopup();
-        ensureMedia(record)
-          .then(() => record.marker.setPopupContent(popupContent(record)))
-          .catch(() => record.marker.setPopupContent('<div class="p-3 text-sm text-red-700">照片预览生成失败</div>'));
       } else {
         map.fitBounds(bounds, { padding: [70, 70], maxZoom: 14 });
       }
     }
 
+    function syncTimelineToRecord(record) {
+      if (!record?.date || !timelineGroups.length) return;
+      const index = timelineGroups.findIndex(group => group.date === record.photoDate);
+      if (index >= 0) showTimelineDate(index, { navigate: false });
+    }
+
     function showAllMarkers() {
+      selectedTimelineMarkers = new Set();
+      timelineHighlightLayer.clearLayers();
       setVisibleMarkerRecords(currentMarkerRecords);
+      if (typeof markerLayer.refreshClusters === 'function') markerLayer.refreshClusters();
       map.closePopup();
       timelineCurrent.textContent = timelineGroups.length
         ? `全部日期 · ${currentMarkerRecords.length} 个地点戳`
@@ -596,6 +1295,8 @@
     }
 
     function popupContent(record, loading = false) {
+      const note = getPhotoNote(record.file);
+      const includedInReport = isPhotoIncludedInReport(record.file);
       return `
         <div class="w-64 max-w-full">
           ${loading
@@ -604,6 +1305,15 @@
           <p class="mt-3 text-xs font-semibold uppercase tracking-wide text-teal-700">照片足迹</p>
           <p class="mt-1 break-all text-sm font-bold text-slate-900">${escapeHtml(record.file.name)}</p>
           <p class="mt-2 text-sm text-slate-600">拍摄日期：${escapeHtml(record.photoDate)}</p>
+          <div class="mt-3 rounded-lg bg-amber-50 px-3 py-2">
+            <p class="text-xs font-semibold text-amber-800">${note ? '备注' : '暂无备注'}</p>
+            ${note ? `<p class="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-amber-900">${escapeHtml(note)}</p>` : ''}
+            <button type="button" data-photo-record-id="${record.noteId}" class="mt-2 text-xs font-semibold text-amber-800 underline underline-offset-2">${note ? '编辑备注' : '添加备注'}</button>
+          </div>
+          <button type="button" data-photo-report-id="${record.noteId}" aria-pressed="${includedInReport}" class="mt-3 w-full rounded-lg px-3 py-2.5 text-sm font-semibold transition ${includedInReport ? 'bg-teal-700 text-white' : 'border border-teal-200 bg-teal-50 text-teal-800'}">
+            ${includedInReport ? '✓ 已加入报告（点击取消）' : '将照片加入足迹报告'}
+          </button>
+          <p class="mt-1.5 text-center text-[11px] leading-4 text-slate-500">加入后报告会显示照片、拍摄日期和批注</p>
         </div>
       `;
     }
@@ -611,6 +1321,7 @@
     function closeViewer() {
       viewerLoadToken += 1;
       currentViewerIndex = -1;
+      currentViewerRecord = null;
       photoViewer.classList.add('hidden');
       photoViewer.classList.remove('flex');
       if (noLocationModal.classList.contains('hidden')) document.body.classList.remove('overflow-hidden');
@@ -629,10 +1340,13 @@
     async function openPhotoViewer(record, index = activeGalleryRecords.indexOf(record)) {
       const loadToken = ++viewerLoadToken;
       currentViewerIndex = index;
+      currentViewerRecord = record;
+      if (record.marker) syncTimelineToRecord(record);
       photoViewer.classList.remove('hidden');
       photoViewer.classList.add('flex');
       photoViewerName.textContent = record.file.name;
       photoViewerDate.textContent = `拍摄日期：${record.photoDate}`;
+      refreshViewerNote(record);
       photoViewerPosition.textContent = `${index + 1} / ${activeGalleryRecords.length}`;
       previousPhotoButton.disabled = index <= 0;
       nextPhotoButton.disabled = index >= activeGalleryRecords.length - 1;
@@ -704,6 +1418,8 @@
           <div class="p-3">
             <p class="truncate text-sm font-semibold text-slate-800" title="${escapeHtml(record.file.name)}">${escapeHtml(record.file.name)}</p>
             <p class="mt-1 text-xs tabular-nums text-slate-500">${escapeHtml(record.photoDate)}</p>
+            ${getPhotoNote(record.file) ? '<p class="mt-1 text-xs font-semibold text-amber-700">📝 已备注</p>' : ''}
+            ${isPhotoIncludedInReport(record.file) ? '<p class="mt-1 text-xs font-semibold text-teal-700">✓ 将显示在报告中</p>' : ''}
           </div>
         </button>
       `).join('');
@@ -781,6 +1497,8 @@
       loadedPhotos.push(...addedPhotos);
       clearSelectionButton.classList.remove('hidden');
       clearSelectionButton.classList.add('inline-flex');
+      reportButton.classList.remove('hidden');
+      reportButton.classList.add('inline-flex');
       await displayPhotos(loadedPhotos);
       status.textContent += ` 本次新增 ${addedPhotos.length} 张，当前共 ${loadedPhotos.length} 张。`;
     }
@@ -789,7 +1507,11 @@
       releaseMedia();
       closeGallery();
       loadedPhotos = [];
+      reportIncludedPhotoIds.clear();
+      currentReportBodyHtml = '';
       routeLayer.clearLayers();
+      timelineHighlightLayer.clearLayers();
+      selectedTimelineMarkers = new Set();
       connectionLegend.classList.add('hidden');
       markerLayer.clearLayers();
       currentMarkerRecords = [];
@@ -804,20 +1526,27 @@
       noLocationCard.disabled = true;
       clearSelectionButton.classList.add('hidden');
       clearSelectionButton.classList.remove('inline-flex');
+      reportButton.classList.add('hidden');
+      reportButton.classList.remove('inline-flex');
       folderInput.value = '';
       singlePhotoInput.value = '';
       map.setView([30, 105], 4);
       status.textContent = '已清空所选照片，可以重新添加照片或文件夹。';
+      refreshReportSelectionSummary();
       setBusy(false);
     }
 
     async function displayPhotos(photos) {
         releaseMedia();
         routeLayer.clearLayers();
+        timelineHighlightLayer.clearLayers();
+        selectedTimelineMarkers = new Set();
         connectionLegend.classList.add('hidden');
         markerLayer.clearLayers();
         timelinePanel.classList.add('hidden');
         currentMarkerRecords = [];
+        photoRecordById.clear();
+        photoRecordSequence = 0;
         timelineGroups = [];
         noLocationRecords = [];
         noLocationCount.textContent = '0';
@@ -870,8 +1599,10 @@
           }
 
           const marker = L.marker([location.lat, location.lng]);
+          const noteId = ++photoRecordSequence;
           const record = {
             marker,
+            noteId,
             file,
             lat: location.lat,
             lng: location.lng,
@@ -882,6 +1613,8 @@
             mediaPromise: null,
             mediaError: null
           };
+          photoRecordById.set(noteId, record);
+          markerRecordLookup.set(marker, record);
 
           marker.bindTooltip(escapeHtml(photoDate), {
             direction: 'top',
@@ -904,6 +1637,7 @@
             }
           });
           marker.on('click', async () => {
+            syncTimelineToRecord(record);
             if (record.displayUrl) {
               marker.setPopupContent(popupContent(record));
               return;
@@ -1014,6 +1748,7 @@
     singlePhotoButton.addEventListener('click', () => singlePhotoInput.click());
     singlePhotoInput.addEventListener('change', processSinglePhoto);
     clearSelectionButton.addEventListener('click', clearSelectedPhotos);
+    reportButton.addEventListener('click', openFootprintReport);
     timelineSlider.addEventListener('input', event => showTimelineDate(Number(event.target.value)));
     showAllButton.addEventListener('click', showAllMarkers);
     fullscreenButton.addEventListener('click', toggleMapFullscreen);
@@ -1027,6 +1762,20 @@
     });
     closeNoLocationModal.addEventListener('click', closeGallery);
     closePhotoViewer.addEventListener('click', closeViewer);
+    editViewerNoteButton.addEventListener('click', () => {
+      if (currentViewerRecord) openPhotoNoteEditor(currentViewerRecord);
+    });
+    toggleViewerReportButton.addEventListener('click', () => {
+      if (!currentViewerRecord) return;
+      setPhotoReportInclusion(currentViewerRecord, !isPhotoIncludedInReport(currentViewerRecord.file));
+    });
+    closeNoteModalButton.addEventListener('click', closeNoteEditor);
+    cancelNoteButton.addEventListener('click', closeNoteEditor);
+    saveNoteButton.addEventListener('click', saveActiveNote);
+    deleteNoteButton.addEventListener('click', deleteActiveNote);
+    closeReportModalButton.addEventListener('click', closeFootprintReport);
+    downloadReportButton.addEventListener('click', downloadFootprintReport);
+    exportPdfButton.addEventListener('click', exportFootprintPdf);
     previousPhotoButton.addEventListener('click', () => showAdjacentPhoto(-1));
     nextPhotoButton.addEventListener('click', () => showAdjacentPhoto(1));
     noLocationModal.addEventListener('click', event => {
@@ -1035,7 +1784,42 @@
     photoViewer.addEventListener('click', event => {
       if (event.target === photoViewer) closeViewer();
     });
+    noteModal.addEventListener('click', event => {
+      if (event.target === noteModal) closeNoteEditor();
+    });
+    reportModal.addEventListener('click', event => {
+      if (event.target === reportModal) closeFootprintReport();
+    });
+    mapSection.addEventListener('click', event => {
+      const target = event.target instanceof Element ? event.target : null;
+      const reportButton = target?.closest('[data-photo-report-id]');
+      if (reportButton) {
+        const record = photoRecordById.get(Number(reportButton.dataset.photoReportId));
+        if (record) setPhotoReportInclusion(record, !isPhotoIncludedInReport(record.file));
+        return;
+      }
+      const photoButton = target?.closest('[data-photo-record-id]');
+      if (photoButton) {
+        const record = photoRecordById.get(Number(photoButton.dataset.photoRecordId));
+        if (record) openPhotoNoteEditor(record);
+        return;
+      }
+      const areaButton = target?.closest('[data-area-note-id]');
+      if (areaButton) {
+        const note = areaNotes.find(item => item.id === areaButton.dataset.areaNoteId);
+        if (note) openExistingAreaNote(note);
+      }
+    });
     document.addEventListener('keydown', event => {
+      if (!reportModal.classList.contains('hidden')) {
+        if (event.key === 'Escape') closeFootprintReport();
+        return;
+      }
+      if (!noteModal.classList.contains('hidden')) {
+        if (event.key === 'Escape') closeNoteEditor();
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') saveActiveNote();
+        return;
+      }
       if (!photoViewer.classList.contains('hidden')) {
         if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
           event.preventDefault();
@@ -1052,6 +1836,8 @@
       if (!noLocationModal.classList.contains('hidden')) closeGallery();
       else if (mapSection.classList.contains('map-fullscreen-fallback')) setFallbackFullscreen(false);
     });
+
+    renderAreaNotes();
 
     if (window.location.protocol === 'file:') {
       status.innerHTML = '<span class="font-semibold text-teal-700">本地文件模式：</span>绿色按钮会自动使用兼容方式读取文件夹。';
