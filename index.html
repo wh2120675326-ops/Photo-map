@@ -8,7 +8,9 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" crossorigin="" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin=""></script>
   <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/heic-to@1.5.2/dist/iife/heic-to.js"></script>
 
@@ -34,6 +36,18 @@
       position: fixed; inset: 0; z-index: 1900; border: 0; border-radius: 0;
     }
     #mapSection.map-fullscreen-fallback #map { height: 100vh; }
+    .photo-marker-cluster {
+      border-radius: 9999px;
+      background: rgb(13 148 136 / 0.22);
+      box-shadow: 0 2px 10px rgb(15 23 42 / 0.28);
+    }
+    .photo-marker-cluster > div {
+      display: flex; width: calc(100% - 8px); height: calc(100% - 8px); margin: 4px;
+      align-items: center; justify-content: center; gap: 2px; border: 2px solid white;
+      border-radius: 9999px; background: #0f766e; color: white; line-height: 1;
+    }
+    .photo-marker-cluster strong { font-size: 14px; font-weight: 800; }
+    .photo-marker-cluster span { font-size: 10px; font-weight: 700; opacity: 0.9; }
     @media (max-width: 640px) {
       #map { min-height: 430px; height: calc(100vh - 22rem); }
     }
@@ -111,6 +125,10 @@
         <span aria-hidden="true">⛶</span>
         <span id="fullscreenButtonText" class="hidden sm:inline">全屏查看</span>
       </button>
+      <div id="connectionLegend" class="absolute right-3 top-16 z-[640] hidden rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-[11px] font-medium text-slate-600 shadow-lg backdrop-blur">
+        <div class="flex items-center gap-2"><span class="block h-1 w-7 rounded-full bg-teal-700"></span><span>连续拍摄</span></div>
+        <div class="mt-1.5 flex items-center gap-2"><span class="block w-7 border-t-2 border-dashed border-amber-600"></span><span>跨区域 / 长间隔</span></div>
+      </div>
       <div id="timelinePanel" class="absolute bottom-8 left-1/2 z-[600] hidden w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 rounded-2xl border border-white/70 bg-white/95 p-4 shadow-xl backdrop-blur sm:p-5">
         <div class="mb-3 flex items-center justify-between gap-3">
           <div>
@@ -198,6 +216,7 @@
     const mapSection = document.getElementById('mapSection');
     const fullscreenButton = document.getElementById('fullscreenButton');
     const fullscreenButtonText = document.getElementById('fullscreenButtonText');
+    const connectionLegend = document.getElementById('connectionLegend');
     const timelinePanel = document.getElementById('timelinePanel');
     const timelineSlider = document.getElementById('timelineSlider');
     const timelineCurrent = document.getElementById('timelineCurrent');
@@ -225,7 +244,38 @@
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
     const routeLayer = L.layerGroup().addTo(map);
-    const markerLayer = L.layerGroup().addTo(map);
+    const markerLayer = typeof L.markerClusterGroup === 'function'
+      ? L.markerClusterGroup({
+          chunkedLoading: true,
+          chunkInterval: 120,
+          chunkDelay: 30,
+          maxClusterRadius: 70,
+          showCoverageOnHover: false,
+          zoomToBoundsOnClick: true,
+          spiderfyOnMaxZoom: true,
+          spiderfyDistanceMultiplier: 1.5,
+          removeOutsideVisibleBounds: true,
+          iconCreateFunction(cluster) {
+            const count = cluster.getChildCount();
+            const size = count < 10 ? 42 : count < 100 ? 50 : 58;
+            return L.divIcon({
+              html: `<div><strong>${count}</strong><span>张</span></div>`,
+              className: 'photo-marker-cluster',
+              iconSize: [size, size]
+            });
+          }
+        }).addTo(map)
+      : L.layerGroup().addTo(map);
+    if (typeof L.markerClusterGroup === 'function') {
+      markerLayer.on('clustermouseover', event => {
+        const cluster = event.layer;
+        const content = `该区域有 ${cluster.getChildCount()} 张照片`;
+        if (cluster.getTooltip()) cluster.setTooltipContent(content);
+        else cluster.bindTooltip(content, { direction: 'top', offset: [0, -8] });
+        cluster.openTooltip();
+      });
+      markerLayer.on('clustermouseout', event => event.layer.closeTooltip());
+    }
     let currentMarkerRecords = [];
     let timelineGroups = [];
     let noLocationRecords = [];
@@ -263,6 +313,20 @@
       return `${year}-${month}-${day}`;
     }
 
+    function setVisibleMarkerRecords(records) {
+      markerLayer.clearLayers();
+      const markers = records.map(record => record.marker);
+      for (const marker of markers) {
+        marker.setOpacity(1);
+        marker.setZIndexOffset(0);
+      }
+      if (typeof markerLayer.addLayers === 'function' && markers.length >= 50) {
+        markerLayer.addLayers(markers);
+      } else {
+        markers.forEach(marker => markerLayer.addLayer(marker));
+      }
+    }
+
     function setupTimeline(records) {
       currentMarkerRecords = records;
       const groups = new Map();
@@ -281,6 +345,7 @@
 
       if (!timelineGroups.length) {
         timelinePanel.classList.add('hidden');
+        showAllMarkers();
         return;
       }
 
@@ -294,8 +359,27 @@
       showAllMarkers();
     }
 
+    function distanceInKilometers(start, end) {
+      const toRadians = degrees => degrees * Math.PI / 180;
+      const earthRadius = 6371;
+      const latitudeDelta = toRadians(end.lat - start.lat);
+      const longitudeDelta = toRadians(end.lng - start.lng);
+      const a = Math.sin(latitudeDelta / 2) ** 2
+        + Math.cos(toRadians(start.lat)) * Math.cos(toRadians(end.lat))
+        * Math.sin(longitudeDelta / 2) ** 2;
+      const clamped = Math.min(1, Math.max(0, a));
+      return earthRadius * 2 * Math.atan2(Math.sqrt(clamped), Math.sqrt(1 - clamped));
+    }
+
+    function formatTimeGap(hours) {
+      if (hours < 48) return `${Math.round(hours)} 小时`;
+      const days = hours / 24;
+      return `${days < 10 ? days.toFixed(1) : Math.round(days)} 天`;
+    }
+
     function drawChronologicalRoute(records) {
       routeLayer.clearLayers();
+      connectionLegend.classList.add('hidden');
       const orderedRecords = records
         .filter(record => record.date instanceof Date && Number.isFinite(record.date.getTime()))
         .sort((a, b) => {
@@ -304,32 +388,41 @@
         });
 
       if (orderedRecords.length < 2) return;
+      connectionLegend.classList.remove('hidden');
 
-      const route = L.polyline(
-        orderedRecords.map(record => [record.lat, record.lng]),
-        {
-          color: '#0f766e',
-          weight: 4,
-          opacity: 0.78,
-          lineCap: 'round',
-          lineJoin: 'round'
-        }
-      ).addTo(routeLayer);
+      for (let index = 1; index < orderedRecords.length; index++) {
+        const start = orderedRecords[index - 1];
+        const end = orderedRecords[index];
+        const distance = distanceInKilometers(start, end);
+        const timeGapHours = Math.abs(end.date.getTime() - start.date.getTime()) / 36e5;
+        const isJump = distance > 800 || timeGapHours > 72;
 
-      route.bindTooltip(
-        `${escapeHtml(orderedRecords[0].photoDate)} → ${escapeHtml(orderedRecords[orderedRecords.length - 1].photoDate)} · ${orderedRecords.length} 个地点戳`,
-        { sticky: true, direction: 'top' }
-      );
+        const connection = L.polyline(
+          [[start.lat, start.lng], [end.lat, end.lng]],
+          {
+            color: isJump ? '#d97706' : '#0f766e',
+            weight: isJump ? 3 : 4,
+            opacity: isJump ? 0.68 : 0.82,
+            dashArray: isJump ? '10 10' : null,
+            lineCap: 'round',
+            lineJoin: 'round'
+          }
+        ).addTo(routeLayer);
+
+        connection.bindTooltip(`
+          <div class="text-xs leading-5">
+            <p class="font-semibold ${isJump ? 'text-amber-700' : 'text-teal-700'}">${isJump ? '跨区域 / 长时间跳跃' : '连续拍摄连接'}</p>
+            <p>${escapeHtml(start.photoDate)} → ${escapeHtml(end.photoDate)}</p>
+            <p class="text-slate-500">约 ${Math.round(distance)} km · 间隔 ${escapeHtml(formatTimeGap(timeGapHours))}</p>
+          </div>
+        `, { sticky: true, direction: 'top' });
+      }
     }
 
     function showTimelineDate(index) {
       const group = timelineGroups[index];
       if (!group) return;
-
-      for (const record of currentMarkerRecords) {
-        record.marker.setOpacity(group.items.includes(record) ? 1 : 0.18);
-        record.marker.setZIndexOffset(group.items.includes(record) ? 1000 : 0);
-      }
+      setVisibleMarkerRecords(group.items);
 
       timelineCurrent.textContent = `${group.date} · ${group.items.length} 个地点戳`;
       const bounds = L.latLngBounds(group.items.map(item => [item.lat, item.lng]));
@@ -346,10 +439,7 @@
     }
 
     function showAllMarkers() {
-      for (const record of currentMarkerRecords) {
-        record.marker.setOpacity(1);
-        record.marker.setZIndexOffset(0);
-      }
+      setVisibleMarkerRecords(currentMarkerRecords);
       map.closePopup();
       timelineCurrent.textContent = timelineGroups.length
         ? `全部日期 · ${currentMarkerRecords.length} 个地点戳`
@@ -700,6 +790,7 @@
       closeGallery();
       loadedPhotos = [];
       routeLayer.clearLayers();
+      connectionLegend.classList.add('hidden');
       markerLayer.clearLayers();
       currentMarkerRecords = [];
       timelineGroups = [];
@@ -723,6 +814,7 @@
     async function displayPhotos(photos) {
         releaseMedia();
         routeLayer.clearLayers();
+        connectionLegend.classList.add('hidden');
         markerLayer.clearLayers();
         timelinePanel.classList.add('hidden');
         currentMarkerRecords = [];
@@ -830,7 +922,6 @@
               `);
             }
           });
-          marker.addTo(markerLayer);
           points.push([location.lat, location.lng]);
           markerRecords.push(record);
           locatedCount.textContent = points.length;
