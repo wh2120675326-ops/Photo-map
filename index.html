@@ -224,6 +224,7 @@
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
+    const routeLayer = L.layerGroup().addTo(map);
     const markerLayer = L.layerGroup().addTo(map);
     let currentMarkerRecords = [];
     let timelineGroups = [];
@@ -291,6 +292,34 @@
       timelineEnd.textContent = timelineGroups[timelineGroups.length - 1].date;
       timelinePanel.classList.remove('hidden');
       showAllMarkers();
+    }
+
+    function drawChronologicalRoute(records) {
+      routeLayer.clearLayers();
+      const orderedRecords = records
+        .filter(record => record.date instanceof Date && Number.isFinite(record.date.getTime()))
+        .sort((a, b) => {
+          const timeDifference = a.date.getTime() - b.date.getTime();
+          return timeDifference || a.file.name.localeCompare(b.file.name, 'zh-CN', { numeric: true });
+        });
+
+      if (orderedRecords.length < 2) return;
+
+      const route = L.polyline(
+        orderedRecords.map(record => [record.lat, record.lng]),
+        {
+          color: '#0f766e',
+          weight: 4,
+          opacity: 0.78,
+          lineCap: 'round',
+          lineJoin: 'round'
+        }
+      ).addTo(routeLayer);
+
+      route.bindTooltip(
+        `${escapeHtml(orderedRecords[0].photoDate)} → ${escapeHtml(orderedRecords[orderedRecords.length - 1].photoDate)} · ${orderedRecords.length} 个地点戳`,
+        { sticky: true, direction: 'top' }
+      );
     }
 
     function showTimelineDate(index) {
@@ -670,6 +699,7 @@
       releaseMedia();
       closeGallery();
       loadedPhotos = [];
+      routeLayer.clearLayers();
       markerLayer.clearLayers();
       currentMarkerRecords = [];
       timelineGroups = [];
@@ -692,6 +722,7 @@
 
     async function displayPhotos(photos) {
         releaseMedia();
+        routeLayer.clearLayers();
         markerLayer.clearLayers();
         timelinePanel.classList.add('hidden');
         currentMarkerRecords = [];
@@ -813,6 +844,7 @@
           if (points.length === 1) map.setView(points[0], 13);
           else map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
           setupTimeline(markerRecords);
+          drawChronologicalRoute(markerRecords);
           locatedCard.disabled = false;
           status.textContent = `读取完成：${points.length} 张有位置，${noLocationRecords.length} 张没有位置。`;
         } else {
